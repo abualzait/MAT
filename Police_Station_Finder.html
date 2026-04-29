@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nearest Police Station Finder</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <style>
+        :root {
+            --primary: #4F46E5;
+            --primary-hover: #4338CA;
+            --bg-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --text-main: #1F2937;
+            --text-secondary: #4B5563;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-main);
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            background: var(--card-bg);
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            max-height: 95vh;
+            overflow-y: auto;
+        }
+
+        .container::-webkit-scrollbar { width: 8px; }
+        .container::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 4px; }
+
+        h1 {
+            margin-top: 0;
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 0.5rem;
+        }
+
+        p.subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media(min-width: 500px) {
+            .input-group { flex-direction: row; }
+            .autocomplete-wrapper { flex: 1; }
+        }
+
+        .autocomplete-wrapper { position: relative; display: flex; width: 100%; }
+        
+        .autocomplete-results {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #E5E7EB; border-radius: 8px; margin-top: 4px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); z-index: 50; list-style: none;
+            padding: 0; max-height: 200px; overflow-y: auto; display: none; text-align: left;
+        }
+        .autocomplete-results.active { display: block; }
+        .autocomplete-item { padding: 0.75rem 1rem; cursor: pointer; border-bottom: 1px solid #F3F4F6; transition: background-color 0.2s; }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:hover { background-color: #F3F4F6; }
+        .autocomplete-name { font-weight: 600; color: var(--text-main); }
+        .autocomplete-desc { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.2rem; }
+
+        input {
+            padding: 0.875rem 1rem;
+            border: 2px solid #E5E7EB;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            outline: none;
+            width: 100%;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+        }
+
+        button {
+            padding: 0.875rem 1.5rem;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+        }
+
+        button:hover { background-color: var(--primary-hover); }
+        button:disabled { opacity: 0.7; cursor: not-allowed; }
+
+        .locate-btn {
+            background-color: #F3F4F6;
+            color: #1F2937;
+            border: 2px solid #E5E7EB;
+            padding: 0.875rem 1rem;
+            font-size: 1.2rem;
+            min-width: 54px;
+        }
+        
+        .locate-btn:hover { background-color: #E2E8F0; }
+
+        .content-area {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            margin-top: 1.5rem;
+            text-align: left;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .left-panel {
+            display: none;
+        }
+        
+        .left-panel.active {
+            display: block;
+        }
+
+        @media(min-width: 768px) {
+            .content-area { flex-direction: row; }
+            .left-panel.active { flex: 1; min-width: 0; }
+            .right-panel { flex: 1; position: sticky; top: 0; min-width: 0;}
+        }
+
+        .result-card {
+            padding: 1.5rem;
+            background: #F9FAFB;
+            border-radius: 12px;
+            border: 2px solid #E5E7EB;
+            border-left: 5px solid var(--primary);
+            margin-bottom: 1.5rem;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .station-role-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .station-name {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem 0;
+            color: var(--text-main);
+        }
+
+        .station-distance {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+            color: var(--text-main);
+        }
+        
+        .station-origin {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .station-address {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .action-button {
+            display: inline-block;
+            background-color: #10B981;
+            color: white;
+            text-decoration: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: background-color 0.2s;
+            text-align: center;
+            width: 100%;
+        }
+
+        .action-button:hover { background-color: #059669; }
+
+        h4.section-title {
+            margin: 0 0 1rem 0;
+            color: var(--text-main);
+            font-size: 1.1rem;
+        }
+
+        .list-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 300px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+
+        .list-group::-webkit-scrollbar { width: 6px; }
+        .list-group::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 4px; }
+
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.875rem;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+        }
+
+        .list-item-name { font-weight: 600; color: var(--text-main); font-size: 0.95rem; line-height: 1.3;}
+        .list-item-dist { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem; }
+        
+        .list-action {
+            background-color: #E2E8F0;
+            color: var(--primary);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            margin-left: 0.5rem;
+        }
+        .list-action:hover { background-color: #CBD5E1; }
+
+        #mapArea {
+            height: 400px;
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            overflow: hidden;
+            background-color: #E2E8F0;
+            z-index: 10;
+        }
+
+        #map { height: 100%; width: 100%; }
+
+        .error {
+            color: #EF4444;
+            margin-top: 1rem;
+            display: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .error.active { display: block; }
+
+        .loader {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 3px solid white;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+        
+        .loading .loader { display: inline-block; }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>nearest Police Station Finder</h1>
+        <p class="subtitle">Enter a location to find the closest police station instantly without installing any software.</p>
+
+        <div class="input-group">
+            <div class="autocomplete-wrapper">
+                <input type="text" id="placeInput" placeholder="e.g. Abdali, Amman" onkeypress="handleKeyPress(event)" oninput="handleInput(event)" autocomplete="off">
+                <ul id="autocompleteResults" class="autocomplete-results"></ul>
+            </div>
+            <button id="searchBtn" onclick="findNearestStation()">
+                <span id="btnText">Search</span>
+                <div class="loader" id="loader"></div>
+            </button>
+            <button id="locateBtn" class="locate-btn" onclick="useMyLocation()" title="Use my current location">
+                📍
+            </button>
+        </div>
+
+        <div id="errorMsg" class="error"></div>
+
+        <div id="contentArea" class="content-area">
+            <div id="leftPanel" class="left-panel">
+                <div id="mainResult" class="result-card">
+                    <div class="station-role-label">Closest Station</div>
+                    <h3 class="station-name" id="stationName">Station Name</h3>
+                    <div class="station-origin" id="stationOrigin">From: ...</div>
+                    <div class="station-distance" id="stationDistance">Distance: 0 km</div>
+                    <div class="station-address" id="stationAddress">Searching local area...</div>
+                    <a href="#" target="_blank" class="action-button" id="directionsBtn">Get Directions on Map</a>
+                </div>
+
+                <div id="othersSection" style="display: none;">
+                    <h4 class="section-title">Other Stations in range</h4>
+                    <div id="otherResults" class="list-group">
+                        <!-- List items populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <div id="mapArea">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        let map = null;
+        let markers = [];
+        let debounceTimer;
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                findNearestStation();
+            }
+        }
+
+        async function handleInput(e) {
+            const query = e.target.value.trim();
+            const resultsContainer = document.getElementById('autocompleteResults');
+            
+            clearTimeout(debounceTimer);
+            
+            if (query.length < 2) {
+                resultsContainer.classList.remove('active');
+                return;
+            }
+
+            debounceTimer = setTimeout(async () => {
+                const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=31.95&lon=35.92&limit=5`;
+                try {
+                    const res = await fetch(url);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    
+                    resultsContainer.innerHTML = '';
+                    
+                    if (data && data.features && data.features.length > 0) {
+                        data.features.forEach(feat => {
+                            const name = feat.properties.name;
+                            if (!name) return;
+                            
+                            const descParts = [];
+                            if (feat.properties.street) descParts.push(feat.properties.street);
+                            if (feat.properties.city) descParts.push(feat.properties.city);
+                            if (feat.properties.state) descParts.push(feat.properties.state);
+                            const desc = descParts.join(', ');
+
+                            const li = document.createElement('li');
+                            li.className = 'autocomplete-item';
+                            li.innerHTML = `
+                                <div class="autocomplete-name">${name}</div>
+                                ${desc ? `<div class="autocomplete-desc">${desc}</div>` : ''}
+                            `;
+                            
+                            li.onclick = () => {
+                                document.getElementById('placeInput').value = name + (desc ? `, ${descParts[descParts.length-1]}` : '');
+                                resultsContainer.classList.remove('active');
+                                findNearestStation();
+                            };
+                            
+                            resultsContainer.appendChild(li);
+                        });
+                        resultsContainer.classList.add('active');
+                    } else {
+                        resultsContainer.classList.remove('active');
+                    }
+                } catch(err) {
+                    console.error("Autocomplete error:", err);
+                }
+            }, 300);
+        }
+
+        document.addEventListener('click', function(e) {
+            const wrapper = document.querySelector('.autocomplete-wrapper');
+            const results = document.getElementById('autocompleteResults');
+            if (wrapper && results && !wrapper.contains(e.target)) {
+                results.classList.remove('active');
+            }
+        });
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        async function fetchNominatim(query) {
+            const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&email=contact@policefinder.local`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) return null;
+                const data = await res.json();
+                return (data && data.length > 0) ? {
+                    lat: parseFloat(data[0].lat),
+                    lon: parseFloat(data[0].lon),
+                    display_name: data[0].display_name
+                } : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function fetchPhoton(query) {
+            // Using a mild location bias for Middle East / Jordan area
+            const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=31.95&lon=35.92&limit=1`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) return null;
+                const data = await res.json();
+                if (data && data.features && data.features.length > 0) {
+                    const feat = data.features[0];
+                    return {
+                        lat: feat.geometry.coordinates[1],
+                        lon: feat.geometry.coordinates[0],
+                        display_name: (feat.properties.name || "Unknown Location") + (feat.properties.city ? `, ${feat.properties.city}` : "")
+                    };
+                }
+            } catch (e) {
+                return null;
+            }
+            return null;
+        }
+
+        async function flexibleGeocode(place) {
+            // 1. Exact Nominatim (+ Jordan specifier)
+            let result = await fetchNominatim(`${place}, Jordan`);
+            if (result) return result;
+            
+            result = await fetchNominatim(place);
+            if (result) return result;
+
+            // 2. Exact Photon API (handles typos natively well)
+            result = await fetchPhoton(place);
+            if (result) return result;
+
+            // 3. Progressive Fallback Mechanism (Dropping descriptive prefixes)
+            const words = place.split(/(?:\s+|،|,)/).filter(w => w.trim().length > 0);
+            
+            let currentWords = [...words];
+            while (currentWords.length > 1) {
+                currentWords.shift(); 
+                const newQuery = currentWords.join(" ");
+                
+                result = await fetchPhoton(newQuery);
+                if (result) return result;
+
+                await new Promise(r => setTimeout(r, 600)); 
+                result = await fetchNominatim(`${newQuery}, Jordan`);
+                if (result) return result;
+
+                await new Promise(r => setTimeout(r, 600));
+                result = await fetchNominatim(newQuery);
+                if (result) return result;
+            }
+
+            // 4. Progressive Fallback Mechanism (Dropping suffixes, e.g. "Amman Sweileh")
+            let revWords = [...words];
+            while (revWords.length > 1) {
+                revWords.pop();
+                const newQuery = revWords.join(" ");
+                
+                result = await fetchPhoton(newQuery);
+                if (result) return result;
+            }
+            
+            return null;
+        }
+
+        function setLoading(isLoading) {
+            const btn = document.getElementById('searchBtn');
+            const locateBtn = document.getElementById('locateBtn');
+            const btnText = document.getElementById('btnText');
+            const loader = document.getElementById('loader');
+            
+            if (isLoading) {
+                btn.disabled = true;
+                locateBtn.disabled = true;
+                btnText.style.display = 'none';
+                loader.style.display = 'inline-block';
+            } else {
+                btn.disabled = false;
+                locateBtn.disabled = false;
+                btnText.style.display = 'inline-block';
+                loader.style.display = 'none';
+            }
+        }
+
+        function showError(msg) {
+            const errorEl = document.getElementById('errorMsg');
+            errorEl.innerHTML = msg;
+            errorEl.classList.add('active');
+            document.getElementById('contentArea').classList.remove('active');
+        }
+
+        function hideError() {
+            document.getElementById('errorMsg').classList.remove('active');
+        }
+
+        function initOrUpdateMap(placeLat, placeLon, stations) {
+            if (!map) {
+                map = L.map('map').setView([placeLat, placeLon], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap'
+                }).addTo(map);
+                
+                // Map OnClick feature
+                map.on('click', async function(e) {
+                    const lat = e.latlng.lat;
+                    const lon = e.latlng.lng;
+                    
+                    hideError();
+                    setLoading(true);
+                    document.getElementById('placeInput').value = "Locating map click...";
+                    
+                    try {
+                        const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14`);
+                        if(revRes.ok) {
+                            const revData = await revRes.json();
+                            if (revData && revData.display_name) {
+                                const parts = revData.display_name.split(',');
+                                const shortName = parts.slice(0, 3).join(',');
+                                document.getElementById('placeInput').value = shortName;
+                                await fetchStationsForCoords(lat, lon, shortName);
+                                return;
+                            }
+                        }
+                    } catch(e) {}
+                    
+                    document.getElementById('placeInput').value = "Selected Map Location";
+                    await fetchStationsForCoords(lat, lon, "Selected Map Location");
+                });
+            } else {
+                markers.forEach(m => map.removeLayer(m));
+                markers = [];
+            }
+            
+            const originIcon = L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            });
+            
+            if (placeLat && placeLon) {
+                const originMarker = L.marker([placeLat, placeLon], {icon: originIcon, zIndexOffset: 1000}).addTo(map)
+                    .bindPopup("<b>Your Target Location</b>");
+                markers.push(originMarker);
+            }
+
+            if (stations) {
+                stations.forEach((st, index) => {
+                    const isMain = index === 0;
+                    const iconBaseUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/';
+                    const iconColor = isMain ? 'red' : 'blue';
+                    
+                    const stIcon = L.icon({
+                        iconUrl: `${iconBaseUrl}marker-icon-2x-${iconColor}.png`,
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34],
+                        shadowSize: [41, 41]
+                    });
+                    
+                    const zIndexMarker = isMain ? 900 : 100;
+                    
+                    const m = L.marker([st.lat, st.lon], {icon: stIcon, zIndexOffset: zIndexMarker}).addTo(map)
+                        .bindPopup(`<b>${st.name}</b><br>${st.dist.toFixed(2)} km away`);
+                    markers.push(m);
+                });
+            }
+
+            if (markers.length > 0) {
+                const group = new L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.1));
+                if (map.getZoom() > 16) map.setZoom(16);
+            }
+        }
+
+        async function findNearestStation() {
+            const placeInput = document.getElementById('placeInput');
+            const place = placeInput.value.trim();
+            if (!place) {
+                showError("Please enter a place name.");
+                return;
+            }
+
+            hideError();
+            setLoading(true);
+
+            try {
+                // 1. Flexible Geocoding
+                const geocodeData = await flexibleGeocode(place);
+
+                if (!geocodeData) {
+                    showError(`We couldn't locate <b>'${place}'</b> precisely. <br><br>📝 <b>Tip:</b> Try simplifying the address to just the main region, like <b>'صويلح'</b> or <b>'Zarqa'</b>`);
+                    setLoading(false);
+                    return;
+                }
+
+                const placeLat = geocodeData.lat;
+                const placeLon = geocodeData.lon;
+                let placeDisplayName = geocodeData.display_name;
+                const nameParts = placeDisplayName.split(",");
+                if(nameParts.length > 3) placeDisplayName = nameParts.slice(0, 3).join(",");
+
+                await fetchStationsForCoords(placeLat, placeLon, placeDisplayName);
+
+            } catch (err) {
+                console.error(err);
+                showError("A network error occurred tracking the place.");
+                setLoading(false);
+            }
+        }
+
+        async function useMyLocation() {
+            if (!navigator.geolocation) {
+                showError("Geolocation is not supported by your browser.");
+                return;
+            }
+            
+            hideError();
+            setLoading(true);
+            document.getElementById('placeInput').value = "Locating...";
+            
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                
+                const revUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&email=contact@policefinder.local`;
+                let displayName = "Your Current Location";
+                try {
+                    const res = await fetch(revUrl);
+                    if(res.ok) {
+                        const data = await res.json();
+                        if(data && data.display_name) {
+                            displayName = data.display_name.split(",").slice(0,3).join(",");
+                            document.getElementById('placeInput').value = displayName;
+                        } else {
+                            document.getElementById('placeInput').value = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                        }
+                    }
+                } catch(e) {
+                     document.getElementById('placeInput').value = "Current Location";
+                }
+                
+                await fetchStationsForCoords(lat, lon, displayName);
+                
+            }, (error) => {
+                setLoading(false);
+                document.getElementById('placeInput').value = "";
+                let msg = "Unable to retrieve your location.";
+                if(error.code === 1) msg += " Please allow location permissions in your browser.";
+                showError(msg);
+            }, { timeout: 10000 });
+        }
+
+        async function fetchStationsForCoords(placeLat, placeLon, placeDisplayName) {
+            try {
+                // To ensure we strictly fetch stations inside Jordan (even near borders), 
+                // we apply 'ISO3166-1="JO"' area lock to the Overpass Query.
+                const latMin = (placeLat - 1.8).toFixed(4);
+                const lonMin = (placeLon - 1.8).toFixed(4);
+                const latMax = (placeLat + 1.8).toFixed(4);
+                const lonMax = (placeLon + 1.8).toFixed(4);
+                
+                const compactQuery = `[out:json][timeout:25];area["ISO3166-1"="JO"]->.jordan;(node["amenity"="police"](area.jordan)(${latMin},${lonMin},${latMax},${lonMax});way["amenity"="police"](area.jordan)(${latMin},${lonMin},${latMax},${lonMax});relation["amenity"="police"](area.jordan)(${latMin},${lonMin},${latMax},${lonMax}););out center;`;
+                const encodedQuery = encodeURIComponent(compactQuery);
+                
+                const endpoints = [
+                    'https://overpass-api.de/api/interpreter',
+                    'https://overpass.openstreetmap.fr/api/interpreter'
+                ];
+
+                let overpassData = null;
+                let lastError = null;
+
+                for(const baseUrl of endpoints) {
+                    try {
+                        let res = await fetch(`${baseUrl}?data=${encodedQuery}`);
+                        if (!res.ok) {
+                            res = await fetch(baseUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: `data=${encodedQuery}`
+                            });
+                        }
+                        if (res.ok) {
+                            let textHtml = await res.text();
+                            try {
+                                overpassData = JSON.parse(textHtml);
+                                if (overpassData.remark) throw new Error(`Overpass Limit: ${overpassData.remark}`);
+                                break;
+                            } catch(err) {
+                                throw new Error("Server returned HTML instead of JSON.");
+                            }
+                        } else {
+                            lastError = new Error(`API returned ${res.status}`);
+                        }
+                    } catch (e) {
+                        lastError = e;
+                    }
+                }
+
+                // If Overpass is completely blocked, rate-limited, or structurally empty, rely on Nominatim POI Fallback.
+                // countrycodes=jo guarantees it strictly stays within Jordan!
+                if (!overpassData || !overpassData.elements || overpassData.elements.length === 0) {
+                    const nomUrl = `https://nominatim.openstreetmap.org/search?q=%5Bamenity%3Dpolice%5D&viewbox=${lonMin},${latMax},${lonMax},${latMin}&bounded=1&countrycodes=jo&format=json&limit=50&email=contact@policefinder.local`;
+                    const resNom = await fetch(nomUrl);
+                    if (resNom.ok) {
+                        const nomData = await resNom.json();
+                        overpassData = { 
+                            elements: nomData.map(n => ({
+                                lat: parseFloat(n.lat),
+                                lon: parseFloat(n.lon),
+                                tags: { name: n.name || n.display_name.split(',')[0] }
+                            }))
+                        };
+                    } else if (!overpassData) {
+                        throw lastError || new Error("All endpoints failed or timed out.");
+                    }
+                }
+
+                if (!overpassData.elements || overpassData.elements.length === 0) {
+                    showError(`No police stations found anywhere near ${placeDisplayName}.`);
+                    setLoading(false);
+                    return;
+                }
+
+                // Process Results
+                let stationsWithDist = [];
+                for (const element of overpassData.elements) {
+                    const elLat = element.lat || (element.center && element.center.lat);
+                    const elLon = element.lon || (element.center && element.center.lon);
+                    
+                    if (elLat && elLon) {
+                        const dist = calculateDistance(placeLat, placeLon, elLat, elLon);
+                        const tags = element.tags || {};
+                        const name = tags['name:en'] || tags['name'] || tags['name:ar'] || "Unnamed Police Station";
+                        
+                        const addrParts = [];
+                        if (tags['addr:street']) addrParts.push(tags['addr:street']);
+                        if (tags['addr:city']) addrParts.push(tags['addr:city']);
+                        const addressStr = addrParts.length > 0 ? addrParts.join(', ') : '';
+
+                        stationsWithDist.push({ lat: elLat, lon: elLon, dist, name, addressStr });
+                    }
+                }
+                
+                stationsWithDist.sort((a,b) => a.dist - b.dist);
+
+                let uniqueStations = [];
+                let seenLocs = new Set();
+                for(let st of stationsWithDist) {
+                    let locKey = st.lat.toFixed(4) + "_" + st.lon.toFixed(4);
+                    if(!seenLocs.has(locKey)) {
+                        seenLocs.add(locKey);
+                        uniqueStations.push(st);
+                    }
+                }
+                
+                document.getElementById('leftPanel').classList.add('active');
+
+                // Update UI for Main Station
+                const nearestStation = uniqueStations[0];
+                document.getElementById('stationName').textContent = nearestStation.name;
+                document.getElementById('stationOrigin').textContent = `From: ${placeDisplayName}`;
+                document.getElementById('stationDistance').textContent = `Distance: ${nearestStation.dist.toFixed(2)} km`;
+                document.getElementById('stationAddress').textContent = nearestStation.addressStr ? `Address info: ${nearestStation.addressStr}` : 'Location identified successfully.';
+                
+                const mainDirUrl = `https://www.google.com/maps/dir/?api=1&origin=${placeLat},${placeLon}&destination=${nearestStation.lat},${nearestStation.lon}`;
+                document.getElementById('directionsBtn').href = mainDirUrl;
+
+                // Update UI for Other Stations
+                const othersSection = document.getElementById('othersSection');
+                const listContainer = document.getElementById('otherResults');
+                listContainer.innerHTML = '';
+                
+                if (uniqueStations.length > 1) {
+                    othersSection.style.display = 'block';
+                    const showCount = Math.min(uniqueStations.length, 11);
+                    for (let i = 1; i < showCount; i++) {
+                        const st = uniqueStations[i];
+                        const div = document.createElement('div');
+                        div.className = 'list-item';
+                        
+                        const dirUrl = `https://www.google.com/maps/dir/?api=1&origin=${placeLat},${placeLon}&destination=${st.lat},${st.lon}`;
+                        
+                        div.innerHTML = `
+                            <div style="flex:1;">
+                                <div class="list-item-name">${st.name}</div>
+                                <div class="list-item-dist">${st.dist.toFixed(2)} km away</div>
+                            </div>
+                            <a href="${dirUrl}" target="_blank" class="list-action">Nav</a>
+                        `;
+                        listContainer.appendChild(div);
+                    }
+                } else {
+                    othersSection.style.display = 'none';
+                }
+
+                // Update UI for Map
+                setTimeout(() => {
+                    initOrUpdateMap(placeLat, placeLon, uniqueStations.slice(0, 11));
+                }, 100);
+
+            } catch(e) {
+                 console.error(e);
+                 showError(`Connection Error: ${e.message || 'The servers are blocked or offline.'}. Please wait a moment and try again.`);
+            } finally {
+                 setLoading(false);
+            }
+        }
+        // Initialize map on page load for the click-to-pick feature
+        window.addEventListener('load', () => {
+             initOrUpdateMap(31.95, 35.92, null);
+        });
+    </script>
+</body>33
+</html>

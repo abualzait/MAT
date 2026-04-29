@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+    async function test() {
+        try {
+            console.log("Fetching POST");
+            const query = `[out:json];node(around:50000,31.9515694,35.9239625)["amenity"="police"];out center;`;
+            const r = await fetch('https://overpass-api.de/api/interpreter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `data=${encodeURIComponent(query)}`
+            });
+            console.log("POST res", r.status, await r.json());
+        } catch(e) {
+            console.error("POST error", e);
+        }
+        try {
+            console.log("Fetching GET");
+            const query2 = `[out:json];node(around:50000,31.9515694,35.9239625)["amenity"="police"];out center;`;
+            const r2 = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query2));
+            console.log("GET res", r2.status, await r2.json());
+        } catch(e) {
+            console.error("GET error", e);
+        }
+    }
+    test();
+</script>
+</body>
+</html>

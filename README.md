@@ -3,7 +3,7 @@
 
 > **Official Arabic Name:** "حقيبة الأدوات المساعدة"  
 > **Full Acronym Definition:** Modular Assistant Toolkit  
-> **Project Version:** 1.17.0
+> **Project Version:** 1.18.0
 
 ---
 

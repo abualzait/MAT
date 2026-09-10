@@ -1,0 +1,15 @@
+.git
+__pycache__
+*.pyc
+scratch/
+tiles/
+*.db
+.env
+.vscode/
+council-report-*.html
+council-transcript-*.md
+download_amman_tiles.py
+extract_data.py
+test.html
+test_overpass.js
+Amman_Police_Stations_Data.csv

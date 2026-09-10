@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.22.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.23.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -52,7 +52,14 @@ load_env()
 MAT_ENV = os.environ.get('MAT_ENV', 'production')
 MAT_PORT = int(os.environ.get('PORT', os.environ.get('MAT_PORT', 5001)))
 MAT_HOST = os.environ.get('MAT_HOST', '0.0.0.0')
-_default_db = '/data/mat_complaints.db' if os.path.isdir('/data') else os.path.join(BASE_DIR, 'mat_complaints.db')
+_data_dir = '/data'
+if not os.path.exists(_data_dir):
+    try:
+        os.makedirs(_data_dir, exist_ok=True)
+    except Exception:
+        _data_dir = BASE_DIR
+
+_default_db = os.path.join(_data_dir, 'mat_complaints.db')
 MAT_DB_PATH = os.environ.get('MAT_DB_PATH', _default_db)
 MAT_API_PREFIX = os.environ.get('MAT_API_PREFIX', '/api/v1/mat')
 MAT_SECRET_KEY = os.environ.get('MAT_SECRET_KEY', 'mat_secret_key_2026')

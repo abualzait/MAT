@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تقرير مجلس الاستشاري | نظام إدارة مواعيد الشكاوي</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1A365D;
+            --primary-light: #2A4365;
+            --accent: #E53E3E;
+            --green: #38A169;
+            --orange: #DD6B20;
+            --purple: #805AD5;
+            --cyan: #0987A0;
+            --pink: #D53F8C;
+            --bg: #F7FAFC;
+            --card: #FFFFFF;
+            --text: #2D3748;
+            --text-light: #718096;
+            --border: #E2E8F0;
+            --shadow: 0 4px 20px rgba(0,0,0,0.06);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Tajawal', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            direction: rtl;
+        }
+
+        .report-header {
+            background: linear-gradient(135deg, #1A365D 0%, #2A4365 50%, #2C5282 100%);
+            color: white;
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+
+        .report-header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .report-header .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.85;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .report-header .timestamp {
+            font-size: 0.85rem;
+            opacity: 0.6;
+            margin-top: 1rem;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        /* Question Section */
+        .question-section {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            border-right: 6px solid var(--primary);
+            margin-bottom: 2rem;
+        }
+
+        .question-section h2 {
+            color: var(--primary);
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .question-section p {
+            color: var(--text);
+            font-size: 0.95rem;
+            line-height: 1.8;
+        }
+
+        /* Verdict Section */
+        .verdict-section {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+            border: 2px solid var(--green);
+        }
+
+        .verdict-section h2 {
+            color: var(--green);
+            font-size: 1.4rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .verdict-block {
+            margin-bottom: 1.5rem;
+            padding: 1.25rem;
+            border-radius: 8px;
+        }
+
+        .verdict-block h3 {
+            font-size: 1.05rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .verdict-block p, .verdict-block li {
+            font-size: 0.92rem;
+            color: var(--text);
+            line-height: 1.8;
+        }
+
+        .verdict-block ul {
+            padding-right: 1.25rem;
+            margin-top: 0.5rem;
+        }
+
+        .verdict-block li {
+            margin-bottom: 0.4rem;
+        }
+
+        .agree-block { background: #F0FFF4; }
+        .agree-block h3 { color: #22543D; }
+
+        .clash-block { background: #FFF5F5; }
+        .clash-block h3 { color: #C53030; }
+
+        .blind-block { background: #FFFFF0; }
+        .blind-block h3 { color: #B7791F; }
+
+        .rec-block { background: #EBF8FF; }
+        .rec-block h3 { color: #2B6CB0; }
+
+        .first-block {
+            background: linear-gradient(135deg, #F0FFF4 0%, #EBF8FF 100%);
+            border: 2px solid var(--green);
+        }
+        .first-block h3 { color: var(--green); }
+
+        /* Agreement Visual */
+        .agreement-visual {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+        }
+
+        .agreement-visual h2 {
+            color: var(--primary);
+            font-size: 1.2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .advisor-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        @media (min-width: 600px) {
+            .advisor-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        .advisor-card {
+            padding: 1rem 1.25rem;
+            border-radius: 8px;
+            border-right: 4px solid;
+            background: #F8FAFC;
+        }
+
+        .advisor-card .name {
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .advisor-card .stance {
+            font-size: 0.85rem;
+            color: var(--text-light);
+        }
+
+        .advisor-card .position-tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-top: 0.5rem;
+        }
+
+        .pos-separate { border-color: var(--accent); }
+        .pos-separate .position-tag { background: #FFF5F5; color: #C53030; }
+
+        .pos-backend { border-color: var(--green); }
+        .pos-backend .position-tag { background: #F0FFF4; color: #22543D; }
+
+        .pos-rethink { border-color: var(--purple); }
+        .pos-rethink .position-tag { background: #FAF5FF; color: #553C9A; }
+
+        .pos-offshelf { border-color: var(--orange); }
+        .pos-offshelf .position-tag { background: #FFFAF0; color: #C05621; }
+
+        .pos-supabase { border-color: var(--cyan); }
+        .pos-supabase .position-tag { background: #E6FFFA; color: #285E61; }
+
+        /* Collapsible */
+        .collapsible-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+
+        .collapsible-header {
+            padding: 1.25rem 1.5rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid transparent;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .collapsible-header:hover {
+            background: #F7FAFC;
+        }
+
+        .collapsible-header h3 {
+            font-size: 1.05rem;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .collapsible-header .toggle {
+            font-size: 1.2rem;
+            color: var(--text-light);
+            transition: transform 0.3s;
+        }
+
+        .collapsible-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease;
+        }
+
+        .collapsible-section.open .collapsible-body {
+            max-height: 3000px;
+        }
+
+        .collapsible-section.open .toggle {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-section.open .collapsible-header {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .advisor-response {
+            padding: 1.5rem;
+        }
+
+        .advisor-response .advisor-label {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+        }
+
+        .advisor-response p {
+            font-size: 0.92rem;
+            line-height: 1.8;
+            margin-bottom: 0.75rem;
+        }
+
+        .advisor-response ol, .advisor-response ul {
+            padding-right: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .advisor-response li {
+            font-size: 0.92rem;
+            line-height: 1.8;
+            margin-bottom: 0.3rem;
+        }
+
+        .advisor-response strong {
+            color: var(--primary);
+        }
+
+        .label-contrarian { background: #FFF5F5; color: #C53030; }
+        .label-firstprinciples { background: #FAF5FF; color: #553C9A; }
+        .label-expansionist { background: #F0FFF4; color: #22543D; }
+        .label-outsider { background: #FFFAF0; color: #C05621; }
+        .label-executor { background: #E6FFFA; color: #285E61; }
+
+        .divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 1rem 0;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-light);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            margin-top: 2rem;
+        }
+
+        .footer strong {
+            color: var(--primary);
+        }
+
+        .peer-review-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #F0F0F0;
+        }
+
+        .peer-review-item:last-child {
+            border-bottom: none;
+        }
+
+        .peer-review-item .reviewer-name {
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .peer-review-item p {
+            font-size: 0.88rem;
+            line-height: 1.7;
+            margin-bottom: 0.4rem;
+        }
+    </style>
+</head>
+<body>
+
+<header class="report-header">
+    <h1>⚖️ تقرير المجلس الاستشاري</h1>
+    <p class="subtitle">توسيع أداة البحث عن المراكز الأمنية إلى منصة إدارة مواعيد الشكاوي — هل يجب البناء داخل التطبيق الحالي أم إنشاء نظام منفصل؟</p>
+    <p class="timestamp">📅 ٢٠ آب ٢٠٢٦ — منهجية مجلس الذكاء الاصطناعي (بإلهام من أندريه كارباثي)</p>
+</header>
+
+<div class="container">
+
+    <!-- Question -->
+    <div class="question-section">
+        <h2>❓ السؤال المطروح على المجلس</h2>
+        <p>
+            لدي تطبيق ويب يعمل كملف HTML واحد (~٤٠ ألف سطر) للبحث عن أقرب مركز شرطة في عمّان، يعمل بدون إنترنت مع خرائط Leaflet محلية.
+            أريد توسيعه إلى منصة إدارة مكتبية، بدءاً بـ<strong>نظام إدارة مواعيد قسم الشكاوي</strong>:
+        </p>
+        <ul style="margin-top: 0.75rem; padding-right: 1.25rem; font-size: 0.92rem;">
+            <li>ضابط في مركز الاتصال يتلقى أرقام هواتف لأشخاص يجب الاتصال بهم</li>
+            <li>يتصل ويحدد موعداً للنظر في الشكوى</li>
+            <li>أحياناً يجب حضور كل من <strong>الشاكي والمشتكى عليه</strong> في نفس الوقت</li>
+            <li>الضابط يرى قائمة جهات اتصال معلقة ويحفظ تفاصيل المواعيد</li>
+            <li>المشرف/المدير يرى جميع التفاصيل، يعدّل، ويضيف جهات اتصال جديدة للضباط</li>
+            <li>التطبيق الحالي client-side بالكامل — لا خادم ولا قاعدة بيانات</li>
+            <li>البيانات حساسة (أرقام هواتف، تفاصيل شكاوي) في سياق حكومي أردني</li>
+        </ul>
+        <p style="margin-top: 1rem;">
+            <strong>القرار:</strong> ما هو أفضل نهج لبناء نظام إدارة مواعيد الشكاوي؟ هل يبقى كتطبيق عميل أم ينتقل إلى تطبيق كامل؟ ما هي اعتبارات البنية والتخزين والأمان الأهم؟
+        </p>
+    </div>
+
+    <!-- Chairman's Verdict -->
+    <div class="verdict-section">
+        <h2>🏛️ حكم المجلس — تقرير الرئيس</h2>
+
+        <div class="verdict-block agree-block">
+            <h3>✅ حيث اتفق المجلس</h3>
+            <ul>
+                <li><strong>البنية الحالية لا تدعم هذه الميزة.</strong> ملف HTML واحد بدون خادم لا يمكنه مشاركة البيانات بين عدة مستخدمين (ضباط + مدير). جميع المستشارين الخمسة اتفقوا على هذا.</li>
+                <li><strong>يجب بناء نظام الشكاوي كتطبيق/وحدة منفصلة</strong>، وليس دمجه في ملف HTML الحالي ذو ٤٠ ألف سطر.</li>
+                <li><strong>نموذج البيانات يأتي أولاً.</strong> الكيانات واضحة: شكاوي ← أطراف (شاكي/مشتكى عليه) ← مواعيد، مع تعيين مهام بحسب الأدوار.</li>
+                <li><strong>الحل يجب أن يكون عربي RTL بالكامل</strong>، يعمل على أجهزة حكومية قد تكون قديمة، ويتوافق مع لغة التصميم الحالية.</li>
+            </ul>
+        </div>
+
+        <div class="verdict-block clash-block">
+            <h3>⚡ حيث اختلف المجلس</h3>
+            <ul>
+                <li><strong>بناء مخصص أم أداة جاهزة؟</strong> المراقب الخارجي اقترح أن الأدوات الجاهزة (Calendly, Trello) قد تكفي. المنفذ والتوسعي يريدان برنامجاً مخصصاً. <em>الحل:</em> الأدوات الجاهزة نادراً ما تلبي متطلبات العربية والسيادة البيانية الحكومية، لكن البناء يجب أن يكون خفيفاً (Supabase/Firebase، وليس خادم Node.js مخصص من الصفر).</li>
+                <li><strong>النطاق:</strong> التوسعي يرى منصة كاملة (SMS، تحليلات، إدارة قضايا). المنفذ يريد MVP في ٣ أسابيع. المعترض يقول أمّنوا البيانات أولاً. <em>الحل:</em> ابدأ بخطة المنفذ المرحلية، لكن صمم نموذج البيانات مع مراعاة الوحدات المستقبلية.</li>
+            </ul>
+        </div>
+
+        <div class="verdict-block blind-block">
+            <h3>🔍 النقاط العمياء التي كشفها المجلس</h3>
+            <ul>
+                <li><strong>لا خطة انتقال:</strong> لم يناقش أحد كيفية الانتقال من سير العمل الحالي (ورقي/هاتفي) إلى النظام الرقمي دون تعطيل العمل الجاري.</li>
+                <li><strong>تعارض المواعيد:</strong> لم يناقش أي مستشار ماذا يحدث عندما لا يتفق الطرفان على وقت، أو عندما يُجدول شكواان في نفس الفترة.</li>
+                <li><strong>التدريب والتبني:</strong> أداة لا يستخدمها الضباط أسوأ من عدم وجود أداة. الواجهة يجب أن تكون بسيطة جداً — بمستوى بساطة واتساب.</li>
+                <li><strong>المتطلبات القانونية:</strong> الأنظمة الحكومية في الأردن لها متطلبات محددة لتخزين البيانات وسجلات الوصول والاحتفاظ بالسجلات.</li>
+            </ul>
+        </div>
+
+        <div class="verdict-block rec-block">
+            <h3>📋 التوصية</h3>
+            <p>
+                ابنِ نظام مواعيد الشكاوي كـ<strong>تطبيق ويب منفصل</strong> باستخدام <strong>Supabase</strong> (أو Firebase) كخلفية. أبقِ أداة البحث عن المراكز كما هي — فهي تعمل بشكل ممتاز لغرضها. اربط التطبيقين من خلال شريط تنقل مشترك، مما يعطي شعوراً بمنصة موحدة دون تعقيد دمج الأكواد.
+            </p>
+            <p style="margin-top: 0.75rem;">
+                ابدأ بخطة المنفذ ذات الـ ٣ أسابيع لكن أدمج نهج مفكر المبادئ الأولى في نموذج البيانات: حدد آلة الحالة (<strong>جديد ← مُعيّن ← تم الاتصال ← مُجدول ← مكتمل</strong>) والعلاقات بين الكيانات قبل كتابة أي واجهة. صمم مخطط قاعدة البيانات مع مراعاة الوحدات المستقبلية (أضف حقل <code>complaint_type</code>، جدول <code>documents</code>، جدول <code>notifications_log</code> حتى لو فارغة مبدئياً).
+            </p>
+        </div>
+
+        <div class="verdict-block first-block">
+            <h3>🎯 أول شيء يجب فعله</h3>
+            <p>
+                <strong>صمم نموذج البيانات على ورقة.</strong> ارسم الكيانات الأربع (شكاوي، أطراف، مواعيد، ضباط)، علاقاتها، وسير عمل الحالة. اعرضها على ضابط واحد ومشرف واحد. تأكد أنها تطابق طريقة عملهم الفعلية قبل كتابة سطر كود واحد.
+            </p>
+        </div>
+    </div>
+
+    <!-- Agreement/Disagreement Visual -->
+    <div class="agreement-visual">
+        <h2>📊 مواقف المستشارين</h2>
+        <div class="advisor-grid">
+            <div class="advisor-card pos-separate">
+                <div class="name">🔴 المعترض (الناقد)</div>
+                <div class="stance">البنية الحالية طريق مسدود. ملف ٤٠ ألف سطر + بيانات حساسة بدون خادم = كارثة أمنية. أعد البناء بالكامل.</div>
+                <div class="position-tag">تطبيق منفصل بالكامل</div>
+            </div>
+            <div class="advisor-card pos-rethink">
+                <div class="name">🟣 مفكر المبادئ الأولى</div>
+                <div class="stance">هذه مسألة قائمة مهام + تقويم. ركّز على نموذج البيانات وآلة الحالة أولاً. التقنية ثانوية.</div>
+                <div class="position-tag">نموذج البيانات أولاً</div>
+            </div>
+            <div class="advisor-card pos-backend">
+                <div class="name">🟢 التوسعي</div>
+                <div class="stance">هذه بداية منصة إدارة قضايا كاملة. SMS تلقائي، تحليلات، إدارة وثائق. ابنِ بأساس متين.</div>
+                <div class="position-tag">منصة قابلة للتوسع</div>
+            </div>
+            <div class="advisor-card pos-offshelf">
+                <div class="name">🟠 المراقب الخارجي</div>
+                <div class="stance">لماذا بناء مخصص؟ تحقق من الأدوات الجاهزة أولاً. وافصل هذا عن أداة البحث — جمهوران مختلفان.</div>
+                <div class="position-tag">تحقق من البدائل أولاً</div>
+            </div>
+            <div class="advisor-card pos-supabase">
+                <div class="name">🔵 المنفذ</div>
+                <div class="stance">Supabase مجاني + ٣ جداول + صفحة HTML منفصلة. أسبوع ١: أساس. أسبوع ٢: ميزات. أسبوع ٣: صقل. أطلق وكرر.</div>
+                <div class="position-tag">MVP في ٣ أسابيع</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advisor Responses (Collapsible) -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>🔴 رأي المعترض (الناقد)</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="advisor-response">
+                <span class="advisor-label label-contrarian">المعترض — يبحث عن العيوب والمخاطر</span>
+                <p>أنت على وشك ارتكاب خطأ جوهري: محاولة توسيع ملف HTML واحد من ٤٠ ألف سطر إلى نظام إدارة مواعيد متعدد المستخدمين. توقف. البنية الحالية لا تدعم هذا. إليك لماذا:</p>
+                <ol>
+                    <li><strong>لا خادم = لا مستخدمين متعددين.</strong> الضباط والمدير لا يمكنهم مشاركة البيانات في تطبيق يعمل على جانب العميل فقط. كل مستخدم يرى حالته المحلية. لا مزامنة، لا مصدر واحد للحقيقة.</li>
+                    <li><strong>كشف البيانات الحساسة.</strong> أرقام هواتف، أسماء شاكين، تفاصيل شكاوي — هذه بيانات شخصية حكومية. تخزينها في localStorage أو قاعدة بيانات على العميل يعني أن أي زميل لديه وصول للمتصفح يمكنه استخراجها. لا تحكم بالوصول، لا سجل تدقيق، لا تشفير.</li>
+                    <li><strong>الملف الحالي غير قابل للصيانة.</strong> ٤٠ ألف سطر HTML مع بيانات مضمنة هو كابوس. إضافة مجال ميزات مختلف تماماً (جدولة مقابل بحث) سيجعل التصحيح والتحديث مستحيلاً.</li>
+                    <li><strong>تحتاج مصادقة.</strong> الضباط مقابل المدير يحتاجون صلاحيات مختلفة. المصادقة على جانب العميل قابلة للتجاوز بسهولة.</li>
+                </ol>
+                <p><strong>العيب القاتل:</strong> تحاول بناء أداة سير عمل تعاونية متعددة المستخدمين ومبنية على الصلاحيات فوق صفحة بحث ثابتة لمستخدم واحد. هذان تطبيقان مختلفان جذرياً. ابنِ نظام الشكاوي كتطبيق منفصل بخلفية حقيقية.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>🟣 رأي مفكر المبادئ الأولى</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="advisor-response">
+                <span class="advisor-label label-firstprinciples">المبادئ الأولى — يعيد صياغة المشكلة من الجذور</span>
+                <p>لنجرد المسألة. المشكلة الأساسية ليست "كيف أضيف ميزات لتطبيقي". بل: <strong>كيف ننسق سير عمل متعدد الخطوات بين ضباط ومشرفين مع المساءلة؟</strong></p>
+                <p>سير العمل هو:</p>
+                <ol>
+                    <li>المشرف يحدد أشخاصاً للتواصل معهم (شاكي، مشتكى عليه، أو كليهما)</li>
+                    <li>الضابط يتلقى مهمة الاتصال</li>
+                    <li>الضابط يتصل ويحدد موعداً</li>
+                    <li>قد يحتاج كلا الطرفين لنفس الفترة الزمنية</li>
+                    <li>المشرف يراجع ويمكنه التعديل</li>
+                </ol>
+                <p>هذه مسألة <strong>قائمة مهام + تقويم</strong>. الكيانات هي: شكاوي (مع أطراف)، مهام (تعيينات اتصال)، ومواعيد (أوقات مجدولة).</p>
+                <p>السؤال الحقيقي ليس "أي إطار عمل" — بل "<strong>ما أبسط طريقة موثوقة لمشاركة الحالة بين ٢-٥ مستخدمين؟</strong>" لفريق صغير في مكتب واحد، حتى جدول Google Sheets مهيكل بشكل صحيح مع AppScript قد يعمل. لكن إذا أردت شيئاً مبنياً لغرض محدد واحترافي:</p>
+                <ul>
+                    <li><strong>نموذج البيانات أولاً:</strong> شكوى ← لها أطراف (شاكي/مشتكى عليه) ← لها مواعيد ← مُعينة لضابط</li>
+                    <li><strong>آلة حالة:</strong> كل شكوى تتحرك عبر حالات: جديد ← مُعيّن ← تم الاتصال ← مُجدول ← مكتمل</li>
+                    <li><strong>قيد:</strong> عندما يُحتاج كلا الطرفين، يجب مشاركة فترة الموعد</li>
+                </ul>
+                <p>لا تدع اختيار التقنية يشتتك عن الحصول على نموذج البيانات الصحيح. نموذج بيانات صحيح مع واجهة أساسية سيتفوق على واجهة جميلة مع نموذج بيانات خاطئ في كل مرة.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>🟢 رأي التوسعي</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="advisor-response">
+                <span class="advisor-label label-expansionist">التوسعي — يبحث عن الفرص الخفية</span>
+                <p>أنت جالس على شيء أكبر بكثير مما تتصور. هذا ليس مجرد "مُجدول مواعيد" — هذه بداية <strong>منصة إدارة قضايا الشكاوي</strong> لأقسام الشرطة.</p>
+                <p>فكر فيما يتبع طبيعياً بمجرد عمل المواعيد:</p>
+                <ul>
+                    <li><strong>تتبع القضايا:</strong> ربط المواعيد بملفات الشكاوي. تتبع حالة الحل.</li>
+                    <li><strong>إشعارات SMS/واتساب:</strong> إرسال تأكيدات وتذكيرات المواعيد تلقائياً لكلا الطرفين. تقليل عدم الحضور بنسبة ٤٠-٦٠%.</li>
+                    <li><strong>لوحة تحليلات:</strong> كم شكوى شهرياً؟ متوسط وقت الحل؟ أي ضابط يعالج أكثر القضايا؟ أي مناطق تولد أكثر الشكاوي؟</li>
+                    <li><strong>إدارة وثائق:</strong> إرفاق مستندات الشكوى، صور الهويات، صور الأدلة.</li>
+                    <li><strong>توسع متعدد الأقسام:</strong> نفس النظام يعمل لمخالفات المرور، التصاريح، الشرطة المجتمعية.</li>
+                    <li><strong>تطبيق موبايل للضباط:</strong> ضباط الميدان يحدثون حالة القضية من هواتفهم.</li>
+                </ul>
+                <p>ميزة الجدولة هي <strong>حصان طروادة</strong> — تحل ألماً فورياً، لكنها تنشئ البنية التحتية لنظام إدارة قضايا كامل.</p>
+                <p>فكر في بناء هذا كتطبيق ويب حقيقي من اليوم الأول. استخدم إطار عمل يتوسع. البحث عن المراكز يصبح وحدة. الشكاوي وحدة أخرى. الوحدات المستقبلية تندمج طبيعياً. شعار عمّان، خط Tajawal، نظام ألوان الأزرق الشرطي — هذه تصبح نظام تصميمك عبر جميع الوحدات.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>🟠 رأي المراقب الخارجي</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="advisor-response">
+                <span class="advisor-label label-outsider">المراقب الخارجي — يرى بعيون جديدة</span>
+                <p>أنظر لهذا بعيون جديدة تماماً، ولدي أسئلة:</p>
+                <ol>
+                    <li><strong>لماذا بناء برنامج مخصص؟</strong> هناك أدوات جدولة مواعيد موجودة (Calendly, Cal.com)، أنظمة CRM (حتى المجانية)، وأدوات إدارة مهام (Trello, Notion). هل تحقق أحد من إمكانية عمل أداة جاهزة؟ سير العمل المذكور عام: تعيين جهات اتصال ← إجراء مكالمات ← حجز مواعيد.</li>
+                    <li><strong>من يستخدم هذا فعلاً؟</strong> ذكرت "ضباط" و"مدير" — كم شخص؟ إذا كانوا ٣ أشخاص في غرفة واحدة، ملف Excel مشترك مع ماكرو قد يكون الجواب فعلاً. إذا كانوا ٥٠ ضابطاً عبر عدة مراكز، هذه مشكلة مختلفة تماماً.</li>
+                    <li><strong>التطبيق الحالي أداة بحث. الميزة الجديدة أداة سير عمل.</strong> تخدم جماهير مختلفة لأغراض مختلفة. دمجها في تطبيق واحد سيربك المستخدمين. أداة البحث عامة (أو مستخدمة على نطاق واسع). نظام الشكاوي داخلي فقط بوصول مقيد.</li>
+                    <li><strong>اللغة والملاءمة الثقافية مهمة.</strong> الواجهة تحتاج أن تكون RTL عربية بالكامل، تعمل جيداً على الأجهزة الحكومية (التي قد تكون قديمة)، وربما تعمل بدون إنترنت (الشبكات الحكومية قد تكون غير مستقرة).</li>
+                </ol>
+                <p>أفصل هاتين الأداتين تماماً. أبقِ أداة البحث كصفحة HTML مستقلة وسريعة. ابنِ نظام الشكاوي كأداة داخلية مميزة.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>🔵 رأي المنفذ</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="advisor-response">
+                <span class="advisor-label label-executor">المنفذ — أقصر طريق للتنفيذ</span>
+                <p>إليك أسرع مسار لنظام مواعيد شكاوي يعمل:</p>
+                <p><strong>الأسبوع ١ — الأساس:</strong></p>
+                <ul>
+                    <li>استخدم <strong>Supabase</strong> (الطبقة المجانية): قاعدة بيانات PostgreSQL فورية، مصادقة مدمجة، أمان على مستوى الصفوف، اشتراكات فورية. لا خادم لإدارته.</li>
+                    <li>أنشئ ٣ جداول: <code>complaints</code>، <code>parties</code> (شاكي/مشتكى عليه)، <code>appointments</code></li>
+                    <li>ابنِ صفحة HTML منفصلة: <code>complaints.html</code> — اربطها من التطبيق الرئيسي لكن أبقها مستقلة</li>
+                    <li>نفذ مصادقة أساسية: تسجيل دخول مدير، تسجيل دخول ضابط (Supabase Auth)</li>
+                </ul>
+                <p><strong>الأسبوع ٢ — الميزات الأساسية:</strong></p>
+                <ul>
+                    <li>واجهة المدير: إضافة شكاوي، إضافة أطراف بأرقام هواتف، تعيين لضباط</li>
+                    <li>واجهة الضابط: رؤية قائمة المكالمات المعلقة، النقر لوضع علامة "تم الاتصال"، إدخال تاريخ/وقت الموعد</li>
+                    <li>جدولة الطرفين: عندما يحتاج كلاهما الحضور، عرض منتقي فترة موعد واحدة</li>
+                    <li>عرض تقويم بسيط باستخدام مكتبة JS خفيفة (FullCalendar)</li>
+                </ul>
+                <p><strong>الأسبوع ٣ — الصقل:</strong></p>
+                <ul>
+                    <li>لوحة معلومات تعرض مواعيد اليوم، المكالمات القادمة، المهام المتأخرة</li>
+                    <li>شارات حالة (جديد / تم الاتصال / مُجدول / مكتمل)</li>
+                    <li>ملخص موعد قابل للطباعة</li>
+                    <li>عربي RTL بالكامل، مطابق لأسلوب التصميم الحالي</li>
+                </ul>
+                <p><strong>ما لا يجب فعله:</strong></p>
+                <ul>
+                    <li>لا تدمج هذا في ملف HTML ذو ٤٠ ألف سطر</li>
+                    <li>لا تبنِ خلفية مخصصة من الصفر</li>
+                    <li>لا تحاول بناء كل شيء دفعة واحدة</li>
+                    <li>لا تقلق بشأن تطبيق موبايل — الويب المتجاوب يكفي</li>
+                </ul>
+                <p>أطلق الأسبوع ١ واجعل ضابطاً واحداً يستخدمه قبل بناء الأسبوع ٢.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer Reviews (Collapsible) -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <h3>📝 نتائج المراجعة المتبادلة</h3>
+            <span class="toggle">▼</span>
+        </div>
+        <div class="collapsible-body">
+            <div class="peer-review-item">
+                <div class="reviewer-name">مراجعة المعترض:</div>
+                <p><strong>الأقوى:</strong> مفكر المبادئ الأولى — حدد بشكل صحيح أن هذه مسألة نموذج بيانات أولاً.</p>
+                <p><strong>أكبر نقطة عمياء:</strong> التوسعي — يتجاهل تماماً قيود الأمان والجدوى، ويقفز إلى SMS والتحليلات قبل أن تعمل الأساسيات.</p>
+                <p><strong>ما فات الجميع:</strong> لم يعالج أحد بشكل كافٍ لوائح خصوصية البيانات في الأردن أو متطلبات مشتريات تكنولوجيا المعلومات الحكومية.</p>
+            </div>
+            <div class="peer-review-item">
+                <div class="reviewer-name">مراجعة مفكر المبادئ الأولى:</div>
+                <p><strong>الأقوى:</strong> المنفذ — يوفر مراحل أسبوعية قابلة للتنفيذ، ويقترح Supabase الذي يتوافق مع مبدأ أبسط خلفية موثوقة.</p>
+                <p><strong>أكبر نقطة عمياء:</strong> المعترض — يحدد المشاكل بشكل صحيح لكنه لا يقدم مساراً بنّاءً للأمام. نقد بحت بدون حلول.</p>
+                <p><strong>ما فات الجميع:</strong> لم يناقش أحد خطة الانتقال — كيف ينتقل سير العمل الحالي (ورقي/هاتفي على الأرجح) إلى النظام الرقمي دون تعطيل.</p>
+            </div>
+            <div class="peer-review-item">
+                <div class="reviewer-name">مراجعة التوسعي:</div>
+                <p><strong>الأقوى:</strong> المنفذ — النهج المرحلي صحيح تماماً لإثبات القيمة بسرعة.</p>
+                <p><strong>أكبر نقطة عمياء:</strong> المراقب الخارجي — اقتراح أدوات جاهزة يتجاهل أن الجهات الحكومية في الأردن غالباً لا تستطيع استخدام أدوات SaaS السحابية بسبب سيادة البيانات، ودعم العربية RTL في معظم الأدوات ضعيف.</p>
+                <p><strong>ما فات الجميع:</strong> لم يذكر أحد التدريب — يجب تدريب الضباط، والواجهة يجب أن تكون بسيطة جداً وإلا سيفشل التبني.</p>
+            </div>
+            <div class="peer-review-item">
+                <div class="reviewer-name">مراجعة المراقب الخارجي:</div>
+                <p><strong>الأقوى:</strong> مفكر المبادئ الأولى — مفهوم آلة الحالة والتركيز على نموذج البيانات هو الرؤية الأكثر قابلية للنقل بغض النظر عن اختيار التقنية.</p>
+                <p><strong>أكبر نقطة عمياء:</strong> التوسعي — يبالغ في النطاق بشكل هائل. بناء "منصة" عندما لا تستطيع حتى جدولة موعد واحد بعد هو كيف تموت المشاريع.</p>
+                <p><strong>ما فات الجميع:</strong> لم يسأل أحد ماذا يحدث عند تعارض المواعيد — ما هي عملية حل التعارض؟ ماذا عن العطل، جداول الضباط، توفر الغرف؟</p>
+            </div>
+            <div class="peer-review-item">
+                <div class="reviewer-name">مراجعة المنفذ:</div>
+                <p><strong>الأقوى:</strong> المعترض — حدد بشكل صحيح الطريق المسدود للبنية، وهي الرؤية الأهم قبل أي بناء.</p>
+                <p><strong>أكبر نقطة عمياء:</strong> المراقب الخارجي — اقتراح Google Sheets ساذج لقسم شرطة يتعامل مع شكاوي. أمان البيانات وسجلات التدقيق مهمة.</p>
+                <p><strong>ما فات الجميع:</strong> لم يناقش أحد المتطلبات القانونية/التنظيمية — الأنظمة الحكومية في الأردن لها على الأرجح متطلبات محددة لتخزين البيانات، تسجيل الوصول، والاحتفاظ بالسجلات.</p>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>
+            <strong>مجلس الذكاء الاصطناعي الاستشاري</strong><br>
+            الموضوع: توسيع أداة البحث عن المراكز الأمنية إلى منصة إدارة مواعيد الشكاوي<br>
+            التاريخ: ٢٠ آب ٢٠٢٦ — الساعة ٠٨:٥٥<br>
+            المنهجية: <a href="https://x.com/karpathy" target="_blank" style="color: var(--primary);">أندريه كارباثي</a> — ٥ مستشارين مستقلين + مراجعة متبادلة مجهولة + تركيب رئيس المجلس
+        </p>
+    </footer>
+</div>
+
+<script>
+    function toggleSection(header) {
+        const section = header.parentElement;
+        section.classList.toggle('open');
+    }
+</script>
+
+</body>
+</html>

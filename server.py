@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.23.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.24.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -27,6 +27,7 @@ import socket
 import threading
 import sys
 import mimetypes
+import shutil
 
 # Ensure UTF-8 stdout encoding for Windows console
 if hasattr(sys.stdout, 'reconfigure'):
@@ -64,6 +65,20 @@ MAT_DB_PATH = os.environ.get('MAT_DB_PATH', _default_db)
 MAT_API_PREFIX = os.environ.get('MAT_API_PREFIX', '/api/v1/mat')
 MAT_SECRET_KEY = os.environ.get('MAT_SECRET_KEY', 'mat_secret_key_2026')
 
+DB_PATH = MAT_DB_PATH
+PORT = MAT_PORT
+HOST = MAT_HOST
+
+# Seed database volume if not already existing
+if not os.path.exists(DB_PATH):
+    source_seed = os.path.join(BASE_DIR, 'complaints.db')
+    if os.path.exists(source_seed) and os.path.abspath(source_seed) != os.path.abspath(DB_PATH):
+        try:
+            shutil.copy2(source_seed, DB_PATH)
+            print(f"[*] Initialized database volume from seed file: {source_seed} -> {DB_PATH}")
+        except Exception as e_seed:
+            print(f"[!] Could not copy seed DB to volume: {e_seed}")
+
 matConfig = {
     'env': MAT_ENV,
     'port': MAT_PORT,
@@ -75,10 +90,6 @@ matConfig = {
     'full_name': 'Modular Assistant Toolkit',
     'description': 'A highly scalable, modular digital workspace designed for governorate departments and official administrative support'
 }
-
-DB_PATH = MAT_DB_PATH
-PORT = MAT_PORT
-HOST = MAT_HOST
 
 
 # ─── Global State ─────────────────────────────────────────────
@@ -149,6 +160,93 @@ def sync_postponed_appointments(conn):
     except Exception as e:
         print(f"Error syncing postponed mat_appointments: {e}")
 
+
+
+BACKUP_JSON_PATH = os.path.join(BASE_DIR, 'data_backup.json')
+
+
+def backup_db_to_json(conn=None):
+    """Export current DB state to data_backup.json for cloud persistence."""
+    should_close = False
+    if conn is None:
+        try:
+            conn = get_db()
+            should_close = True
+        except Exception:
+            return
+    try:
+        data = {
+            'officers': rows_to_list(conn.execute("SELECT * FROM mat_officers").fetchall()),
+            'simple_appointments': rows_to_list(conn.execute("SELECT * FROM mat_simple_appointments").fetchall()),
+            'reserved_files': rows_to_list(conn.execute("SELECT * FROM mat_reserved_files").fetchall()),
+            'file_custody_log': rows_to_list(conn.execute("SELECT * FROM mat_file_custody_log").fetchall()),
+            'search_logs': rows_to_list(conn.execute("SELECT * FROM mat_search_logs").fetchall()),
+            'updated_at': datetime.now().isoformat()
+        }
+        with open(BACKUP_JSON_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error backing up DB to JSON: {e}")
+    finally:
+        if should_close:
+            conn.close()
+
+
+def restore_db_from_json(conn):
+    """Restore DB state from data_backup.json if database tables are empty or newly initialized."""
+    if not os.path.exists(BACKUP_JSON_PATH):
+        return
+    try:
+        with open(BACKUP_JSON_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Restore Officers
+        officers = data.get('officers', [])
+        for o in officers:
+            existing = conn.execute("SELECT id FROM mat_officers WHERE username = ?", (o['username'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_officers (id, name, username, password_hash, salt, role, accessible_tools, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (o.get('id'), o.get('name'), o.get('username'), o.get('password_hash'), o.get('salt'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('created_at'), o.get('updated_at')))
+            else:
+                conn.execute("""
+                    UPDATE mat_officers SET name = ?, role = ?, accessible_tools = ?, is_active = ?, updated_at = ? WHERE username = ?
+                """, (o.get('name'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('updated_at'), o['username']))
+
+        # Restore Simple Appointments
+        appts = data.get('simple_appointments', [])
+        for a in appts:
+            existing = conn.execute("SELECT id FROM mat_simple_appointments WHERE id = ?", (a['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_simple_appointments (id, case_number, visitor_name, phone, national_id, station_name, appointment_date, appointment_time, status, notes, created_by_id, requested_by_id, parent_appointment_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (a.get('id'), a.get('case_number'), a.get('visitor_name'), a.get('phone'), a.get('national_id'), a.get('station_name'), a.get('appointment_date'), a.get('appointment_time'), a.get('status'), a.get('notes'), a.get('created_by_id'), a.get('requested_by_id'), a.get('parent_appointment_id'), a.get('created_at'), a.get('updated_at')))
+
+        # Restore Reserved Files
+        files = data.get('reserved_files', [])
+        for r in files:
+            existing = conn.execute("SELECT id FROM mat_reserved_files WHERE file_number = ?", (r['file_number'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_reserved_files (id, file_number, officer_id, notes, reserved_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (r.get('id'), r.get('file_number'), r.get('officer_id'), r.get('notes'), r.get('reserved_at')))
+
+        # Restore File Custody Log
+        logs = data.get('file_custody_log', [])
+        for l in logs:
+            existing = conn.execute("SELECT id FROM mat_file_custody_log WHERE id = ?", (l['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_file_custody_log (id, reserved_file_id, from_officer_id, to_officer_id, status, notes, transferred_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (l.get('id'), l.get('reserved_file_id'), l.get('from_officer_id'), l.get('to_officer_id'), l.get('status'), l.get('notes'), l.get('transferred_at')))
+
+        conn.commit()
+    except Exception as e:
+        print(f"Error restoring DB from JSON backup: {e}")
 
 
 def init_db():
@@ -442,8 +540,10 @@ def init_db():
         print("│                                                   │")
         print("└─────────────────────────────────────────────────┘")
 
+    restore_db_from_json(conn)
     conn.commit()
     conn.close()
+    backup_db_to_json()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1785,6 +1885,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         log_activity(conn, user['user_id'], 'إنشاء حساب', 'officer', c.lastrowid, f"{name} ({role})")
         conn.commit()
         conn.close()
+        backup_db_to_json()
         self.send_json({'success': True, 'id': c.lastrowid}, 201)
 
     def api_update_officer(self, officer_id):
@@ -1815,6 +1916,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             conn.commit()
 
         conn.close()
+        backup_db_to_json()
         self.send_json({'success': True})
 
     # ── SIMPLE APPOINTMENTS API ───────────────────────────────
@@ -2096,6 +2198,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         sync_postponed_appointments(conn)
         conn.commit()
         conn.close()
+        backup_db_to_json()
 
         self.send_json({'success': True, 'id': appt_id}, 201)
 
@@ -2169,6 +2272,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             conn.commit()
 
         conn.close()
+        backup_db_to_json()
         self.send_json({'success': True})
 
     def api_get_simple_appointment_detail(self, appt_id):
@@ -2229,6 +2333,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         conn.execute("DELETE FROM mat_simple_appointments WHERE id = ?", (appt_id,))
         conn.commit()
         conn.close()
+        backup_db_to_json()
         self.send_json({'success': True})
 
     # ── FILE RESERVATIONS API ─────────────────────────────────

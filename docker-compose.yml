@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  mat-toolkit:
+    build: .
+    container_name: mat_toolkit
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MAT_ENV=production
+      - MAT_SECRET_KEY=mat_secret_key_2026
+    volumes:
+      - mat_data:/data
+    restart: unless-stopped
+
+volumes:
+  mat_data:
+    driver: local

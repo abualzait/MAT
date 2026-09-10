@@ -1,0 +1,69 @@
+{
+  "officers": [
+    {
+      "id": 1,
+      "name": "عروة",
+      "username": "orwa",
+      "password_hash": "pbkdf2:3fcf0ef9e713b999306e287a5b232fc722174bfdb581764d9e89f2f933cac0ab",
+      "salt": "dbcb9d0c87da464695b5e29f7f0acf6a",
+      "role": "admin",
+      "accessible_tools": "dashboard,mat_complaints,finder,chat",
+      "is_active": 1,
+      "created_at": "2026-09-10 10:31:16",
+      "updated_at": "2026-09-10 10:31:16"
+    },
+    {
+      "id": 2,
+      "name": "ايهاب",
+      "username": "ehab",
+      "password_hash": "pbkdf2:bb6b4dabe98ee63b3b181141ea3be12ecc29756bdf536dcd7f5bf5d90888d35b",
+      "salt": "0f01413566bc4d2d90850df644a9a282",
+      "role": "officer",
+      "accessible_tools": "dashboard,mat_complaints,finder,chat",
+      "is_active": 1,
+      "created_at": "2026-09-10 10:31:16",
+      "updated_at": "2026-09-10 10:31:16"
+    },
+    {
+      "id": 3,
+      "name": "سلطان",
+      "username": "sultan",
+      "password_hash": "pbkdf2:0bfc5565c453e9862bcf111669f3c5a971550cb70678e1f586f31257918efeea",
+      "salt": "60a000aff10e4d32b9bff890cad8be96",
+      "role": "officer",
+      "accessible_tools": "dashboard,mat_complaints,finder,chat",
+      "is_active": 1,
+      "created_at": "2026-09-10 10:31:16",
+      "updated_at": "2026-09-10 10:31:16"
+    },
+    {
+      "id": 4,
+      "name": "ابوالزيت",
+      "username": "abualzait",
+      "password_hash": "pbkdf2:914eeb6a65c0c2fabdae1415d69bc1447c07bf507ebd5831c83d4f854dcd5bc4",
+      "salt": "b52016d7f43e45588c59d5ee2bae9161",
+      "role": "officer",
+      "accessible_tools": "dashboard,mat_complaints,finder,chat",
+      "is_active": 1,
+      "created_at": "2026-09-10 10:31:16",
+      "updated_at": "2026-09-10 10:31:16"
+    },
+    {
+      "id": 5,
+      "name": "رعد",
+      "username": "raad",
+      "password_hash": "pbkdf2:98992fb07baa0a137295354007ba16965b295a5788e68cdf16578c59c5f41641",
+      "salt": "2102d7d202314c8a95788c58ba8a5edd",
+      "role": "caller",
+      "accessible_tools": "dashboard,mat_complaints,finder,chat",
+      "is_active": 1,
+      "created_at": "2026-09-10 10:31:17",
+      "updated_at": "2026-09-10 10:31:17"
+    }
+  ],
+  "simple_appointments": [],
+  "reserved_files": [],
+  "file_custody_log": [],
+  "search_logs": [],
+  "updated_at": "2026-09-10T20:39:13.516769"
+}

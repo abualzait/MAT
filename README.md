@@ -3,12 +3,18 @@
 
 > **Official Arabic Name:** "حقيبة الأدوات المساعدة"  
 > **Full Acronym Definition:** Modular Assistant Toolkit  
-> **Project Version:** 1.23.0  
+> **Project Version:** 1.24.0  
 > **Official Short URL:** [https://abualzait.github.io/MAT](https://abualzait.github.io/MAT)  
 > **Direct Live Deployment:** [https://mat-ee756.containers.snapdeploy.app](https://mat-ee756.containers.snapdeploy.app)  
 > **Cloud Secret Key:** `mat_secret_key_2026_prod`
 
 ---
+
+## 💾 Volume Persistence & Storage
+The application includes automatic persistent volume support (`/data`) to prevent data loss across container restarts:
+- **Docker Compose:** Run `docker compose up -d` (uses the `mat_data` volume).
+- **Docker CLI:** Run `docker run -d -p 8080:8080 -v mat_data:/data mat_toolkit`
+- **Auto JSON Backup:** Database state is continuously saved to `data_backup.json` and restored on startup.
 
 ## 📋 Overview & Strategic Vision
 

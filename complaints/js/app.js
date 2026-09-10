@@ -133,9 +133,12 @@ function renderUserInfo() {
         if (adminBtn) adminBtn.style.display = 'flex';
     }
 
-    const tools = currentUser.accessible_tools || [];
-    const isAdmin = currentUser.role === 'admin';
-    
+    let tools = currentUser.accessible_tools || [];
+    if (typeof tools === 'string') {
+        tools = tools.split(',').map(t => t.trim());
+    }
+    const isAdmin = currentUser.role === 'admin' || localStorage.getItem('adminModeActive') === 'true';
+
     renderDynamicNavigation(tools, isAdmin, currentUser.role);
 }
 
@@ -143,12 +146,23 @@ function renderDynamicNavigation(tools, isAdmin, role) {
     const navMenu = document.getElementById('dynamicSidebarMenu');
     if (!navMenu) return;
 
+    if (typeof tools === 'string') {
+        tools = tools.split(',').map(t => t.trim());
+    }
+
+    const hasDashboard = isAdmin || tools.includes('dashboard');
+    const hasComplaints = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints');
+    const hasFinder = isAdmin || tools.includes('finder') || tools.includes('stations');
+    const hasFiles = isAdmin || tools.includes('file_reservations') || tools.includes('reservations') || role === 'officer';
+    const hasChat = isAdmin || tools.includes('chat');
+    const hasAdminPerms = isAdmin || tools.includes('admin_permissions') || localStorage.getItem('adminModeActive') === 'true';
+
     let html = '';
     let toolsCount = 0;
     let toolsListHtml = '';
 
     // Group 0: Dashboard (Top Level)
-    if (isAdmin || tools.includes('dashboard')) {
+    if (hasDashboard) {
         html += `
             <div class="nav-group">
                 <div class="nav-sub-menu" style="display:flex;">
@@ -159,11 +173,11 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </div>`;
     }
 
-    // Group 1: Appointments
-    if (isAdmin || tools.includes('complaints')) {
+    // Group 1: Appointments (Expanded by default so sub-items and icons are visible)
+    if (hasComplaints) {
         toolsCount++;
         toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. نظام المواعيد</strong> 📅</li>`;
-        
+
         let apptSubItems = [
             { icon: '📅', text: 'جدولة المواعيد والقضايا', onclick: "switchTab('appointments')", active: false },
             { icon: '🗓️', text: 'العرض اليومي (بطاقات)', onclick: "switchTab('daily-view')", active: role === 'caller' },
@@ -176,7 +190,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </button>`).join('');
 
         html += `
-            <div class="nav-group">
+            <div class="nav-group expanded">
                 <button class="nav-group-header" onclick="toggleNavGroup(this)" title="نظام المواعيد">
                     <div class="nav-header-left"><span class="nav-icon">📅</span><span class="nav-text">نظام المواعيد</span></div>
                     <span class="nav-chevron">▼</span>
@@ -185,8 +199,8 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </div>`;
     }
 
-    // Group 2: Geographic Tools (Single page -> Direct page button)
-    if (isAdmin || tools.includes('finder')) {
+    // Group 2: Geographic Tools
+    if (hasFinder) {
         toolsCount++;
         toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. دليل المراكز الأمنية</strong> 🗺️</li>`;
         html += `
@@ -202,8 +216,8 @@ function renderDynamicNavigation(tools, isAdmin, role) {
         if (topSearchedCard) topSearchedCard.style.display = 'none';
     }
 
-    // Group 2.5: Tracking Tools / File Reservations (Single page -> Direct page button)
-    if (isAdmin || tools.includes('file_reservations') || role === 'officer') {
+    // Group 2.5: Tracking Tools / File Reservations
+    if (hasFiles) {
         toolsCount++;
         toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. أداة حجز الملفات</strong> 🔒</li>`;
         html += `
@@ -216,13 +230,13 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </div>`;
     }
 
-    // Group 3: Settings & System Administration
-    if (isAdmin || tools.includes('admin_permissions')) {
+    // Group 3: Settings & System Administration (Expanded by default when present)
+    if (hasAdminPerms) {
         let adminSubItems = [];
-        if (isAdmin) {
+        if (isAdmin || role === 'admin') {
             adminSubItems.push({ icon: '⚙️', text: 'الإعدادات والصلاحيات', onclick: "switchTab('officers')" });
         }
-        if (tools.includes('admin_permissions') || localStorage.getItem('adminModeActive') === 'true') {
+        if (hasAdminPerms) {
             adminSubItems.push({ icon: '👑', text: 'الصلاحيات المتقدمة', onclick: "switchTab('admin_permissions')" });
         }
 
@@ -243,7 +257,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
                 </button>`).join('');
 
             html += `
-                <div class="nav-group">
+                <div class="nav-group expanded">
                     <button class="nav-group-header" onclick="toggleNavGroup(this)" title="إدارة النظام">
                         <div class="nav-header-left"><span class="nav-icon">🛡️</span><span class="nav-text">إدارة النظام</span></div>
                         <span class="nav-chevron">▼</span>
@@ -253,8 +267,8 @@ function renderDynamicNavigation(tools, isAdmin, role) {
         }
     }
 
-    // Standalone Item: غرفة الاجتماعات (تعتمد على صلاحية المحادثة)
-    if (isAdmin || tools.includes('chat')) {
+    // Standalone Item: غرفة الاجتماعات
+    if (hasChat) {
         toolsCount++;
         toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. غرفة الاجتماعات</strong> 💬</li>`;
         html += `
@@ -366,7 +380,7 @@ async function loadAdminPermissions() {
         const data = await res.json();
         
         // Filter out disabled/inactive users so they do NOT appear on the permissions page
-        const activeOfficers = (data.officers || []).filter(o => o.is_active);
+        const activeOfficers = ((data.officers || data.mat_officers) || []).filter(o => o.is_active);
 
         if (activeOfficers.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center">لا يوجد مستخدمين فعّالين لعرضهم</td></tr>';
@@ -431,7 +445,8 @@ async function togglePermission(officerId, toolName, isChecked) {
     try {
         const res = await fetch('/api/v1/mat/officers');
         const data = await res.json();
-        const officer = data.officers.find(o => o.id === officerId);
+        const officersList = data.officers || data.mat_officers || [];
+        const officer = officersList.find(o => o.id === officerId);
         if (!officer) return;
         
         let toolsArray = officer.accessible_tools ? officer.accessible_tools.split(',').map(t => t.trim()).filter(Boolean) : [];

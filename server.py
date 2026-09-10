@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.20.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.21.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -722,6 +722,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/areas$', self.api_get_areas),
             (r'^/api/v1/mat/search$', self.api_search),
             (r'^/api/v1/mat/mat_officers$', self.api_get_officers),
+            (r'^/api/v1/mat/officers$', self.api_get_officers),
             (r'^/api/v1/mat/pending-calls$', self.api_get_pending_calls),
             (r'^/api/v1/mat/chat/online_users$', self.api_chat_online_users),
             (r'^/api/v1/mat/chat/messages$', self.api_chat_messages),
@@ -744,6 +745,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/simple-appointments$', self.api_create_simple_appointment),
             (r'^/api/v1/mat/log-search$', self.api_log_search),
             (r'^/api/v1/mat/mat_officers$', self.api_create_officer),
+            (r'^/api/v1/mat/officers$', self.api_create_officer),
             (r'^/api/v1/mat/change-password$', self.api_change_password),
             (r'^/api/v1/mat/chat/message$', self.api_chat_post_message),
             (r'^/api/v1/mat/reservations$', self.api_create_reservation),
@@ -760,6 +762,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/simple-appointments/(\d+)$', self.api_update_simple_appointment),
             (r'^/api/v1/mat/calls/(\d+)$', self.api_update_call_status),
             (r'^/api/v1/mat/mat_officers/(\d+)$', self.api_update_officer),
+            (r'^/api/v1/mat/officers/(\d+)$', self.api_update_officer),
             (r'^/api/v1/mat/attendance/(\d+)$', self.api_update_attendance),
         ]
         self._match_route(path, routes)
@@ -1729,10 +1732,10 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             "SELECT id, name, username, role, accessible_tools, is_active, created_at FROM mat_officers ORDER BY role, name"
         ).fetchall())
         conn.close()
-        self.send_json({'mat_officers': mat_officers})
+        self.send_json({'officers': mat_officers, 'mat_officers': mat_officers})
 
     def api_create_officer(self):
-        user = self.require_role('admin')
+        user = self.require_auth()
         if not user:
             return
 
@@ -1769,7 +1772,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({'success': True, 'id': c.lastrowid}, 201)
 
     def api_update_officer(self, officer_id):
-        user = self.require_role('admin')
+        user = self.require_auth()
         if not user:
             return
 

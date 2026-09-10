@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.21.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.22.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -723,6 +723,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/search$', self.api_search),
             (r'^/api/v1/mat/mat_officers$', self.api_get_officers),
             (r'^/api/v1/mat/officers$', self.api_get_officers),
+            (r'^/api/v1/mat/active-users$', self.api_get_active_users),
             (r'^/api/v1/mat/pending-calls$', self.api_get_pending_calls),
             (r'^/api/v1/mat/chat/online_users$', self.api_chat_online_users),
             (r'^/api/v1/mat/chat/messages$', self.api_chat_messages),
@@ -1721,6 +1722,14 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         })
 
     # ── OFFICERS API ──────────────────────────────────────────
+
+    def api_get_active_users(self):
+        conn = get_db()
+        users = rows_to_list(conn.execute(
+            "SELECT id, name, username, role FROM mat_officers WHERE is_active = 1 ORDER BY id ASC"
+        ).fetchall())
+        conn.close()
+        self.send_json({'users': users})
 
     def api_get_officers(self):
         user = self.require_auth()

@@ -3,7 +3,7 @@ const matConfig = {
     name: 'MAT',
     arabicName: 'حقيبة الأدوات المساعدة',
     fullName: 'Modular Assistant Toolkit',
-    apiPrefix: '/api/v1/mat/v1/mat'
+    apiPrefix: '/api/v1/mat'
 };
 /**
  * نظام دليل المراكز الأمنية وجدولة المواعيد — JS
@@ -11,15 +11,29 @@ const matConfig = {
 
 let currentUser = null;
 
-// ── CSRF Setup ──────────────────────────────────────────────
+// ── Smart API Backend Routing & CSRF Setup ────────────────────
+const BACKEND_HOST = (typeof window !== 'undefined' && (window.location.hostname.includes('hf.space') || window.location.hostname.includes('github.io'))) 
+    ? 'https://mat-ee756.containers.snapdeploy.app' 
+    : '';
+
 const originalFetch = window.fetch;
 window.fetch = async function(resource, config = {}) {
+    let targetUrl = typeof resource === 'string' ? resource : (resource ? resource.url : '');
+    if (targetUrl.startsWith('/api/')) {
+        targetUrl = BACKEND_HOST + targetUrl;
+        if (typeof resource === 'string') {
+            resource = targetUrl;
+        }
+    }
     const csrfMatch = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
     if (csrfMatch && csrfMatch[1]) {
         config.headers = {
             ...config.headers,
             'X-CSRF-Token': csrfMatch[1]
         };
+    }
+    if (BACKEND_HOST) {
+        config.credentials = 'include';
     }
     return originalFetch(resource, config);
 };

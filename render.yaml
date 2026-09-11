@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mat-toolkit
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: MAT_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: MAT_HOST
+        value: 0.0.0.0
+      - key: MAT_SECRET_KEY
+        value: mat_secret_key_2026_prod

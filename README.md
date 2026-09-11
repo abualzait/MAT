@@ -13,8 +13,9 @@ license: mit
 
 > **Official Arabic Name:** "حقيبة الأدوات المساعدة"  
 > **Full Acronym Definition:** Modular Assistant Toolkit  
-> **Project Version:** 1.29.0  
+> **Project Version:** 1.30.0  
 > **Official Short URL:** [https://abualzait.github.io/MAT](https://abualzait.github.io/MAT)  
+> **Hugging Face Live Space:** [https://abualzait-mat.hf.space](https://abualzait-mat.hf.space)  
 > **Direct Live Deployment:** [https://mat-ee756.containers.snapdeploy.app](https://mat-ee756.containers.snapdeploy.app)  
 > **Cloud Secret Key:** `mat_secret_key_2026_prod`
 

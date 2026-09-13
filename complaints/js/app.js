@@ -1612,6 +1612,7 @@ async function toggleChatPane(forceOpen = false) {
     const isShown = pane.classList.contains('show');
     
     if (isShown) {
+        if (typeof requestPushPermission === 'function') requestPushPermission(true);
         chatPollActive = true;
         loadOnlineUsers(true);
         await loadInitialChatMessages();

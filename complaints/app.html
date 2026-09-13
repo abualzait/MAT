@@ -898,8 +898,10 @@
     <script src="/complaints/js/app.js?v=2026"></script>
     
     <script>
-      // Register Service Worker and manage FCM Push permissions
+      // Seamless FCM Push Permission & Token Sync
       let messaging = null;
+      let fcmPermissionRequested = false;
+
       if ('serviceWorker' in navigator && 'Notification' in window) {
         try {
           firebase.initializeApp({
@@ -910,39 +912,65 @@
 
           navigator.serviceWorker.register('/firebase-messaging-sw.js').then((reg) => {
             console.log('[SW] Registered successfully:', reg.scope);
+            // If already granted, silently sync token immediately
+            if (Notification.permission === 'granted') {
+              syncFcmTokenSilent();
+            }
           }).catch((err) => console.warn('[SW] Registration failed:', err));
         } catch (e) {
           console.warn('[FCM] Initialization warning:', e);
         }
       }
 
-      async function requestPushPermission() {
-        if (!messaging) {
-          alert("تنبيه: التنبيهات المنبثقة غير مدعومة مباشرة في متصفحك أو تتطلب الاتصال بشبكة آمنة (HTTPS).");
-          return;
-        }
+      async function syncFcmTokenSilent() {
+        if (!messaging) return;
         try {
-          const permission = await Notification.requestPermission();
-          if (permission === 'granted') {
-            const reg = await navigator.serviceWorker.ready;
-            const token = await messaging.getToken({ serviceWorkerRegistration: reg });
-            if (token) {
-              await fetch('/api/v1/mat/save-fcm-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fcm_token: token })
-              });
-              alert("✅ تم تفعيل إشعارات الشاشة المغلقة بنجاح! ستصلك تنبيهات المحادثات فوراً.");
-              const btn = document.getElementById('enablePushBtn');
-              if (btn) btn.innerText = '✅ الشاشة المغلقة مفعلة';
-            }
-          } else {
-            alert("⚠️ تم رفض إذن الإشعارات من المتصفح.");
+          const reg = await navigator.serviceWorker.ready;
+          const token = await messaging.getToken({ serviceWorkerRegistration: reg });
+          if (token) {
+            await fetch('/api/v1/mat/save-fcm-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fcm_token: token })
+            });
+            console.log('[FCM] Token synced successfully');
           }
         } catch (err) {
-          console.error("Error requesting push permission:", err);
+          console.error('[FCM] Silent sync error:', err);
         }
       }
+
+      async function requestPushPermission(silent = false) {
+        if (!messaging || fcmPermissionRequested) return;
+        fcmPermissionRequested = true;
+
+        try {
+          if (Notification.permission === 'granted') {
+            await syncFcmTokenSilent();
+            return;
+          }
+
+          if (Notification.permission !== 'denied') {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+              await syncFcmTokenSilent();
+              if (!silent) {
+                console.log('✅ Lock screen notifications activated');
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Push permission error:", err);
+        }
+      }
+
+      // Auto-trigger permission request on first user tap/click anywhere in app
+      document.addEventListener('click', function autoPushHandler() {
+        if (Notification && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+          requestPushPermission(true);
+        }
+        document.removeEventListener('click', autoPushHandler);
+      }, { once: true });
     </script>
 </body>
 

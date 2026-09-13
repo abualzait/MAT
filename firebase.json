@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "mat",
+    "site": "mat-moi",
     "public": ".",
     "ignore": [
       "firebase.json",

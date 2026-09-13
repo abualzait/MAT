@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.40.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.41.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -21,6 +21,9 @@ import uuid
 import os
 import re
 import urllib.parse
+import urllib.request
+import base64
+import ssl
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
 import socket
@@ -28,6 +31,149 @@ import threading
 import sys
 import mimetypes
 import shutil
+
+# ─── FCM Push Notification Helper (Zero external libraries) ─────────────
+_fcm_token_cache = {'token': None, 'expires_at': 0}
+
+def get_google_oauth2_token():
+    """Retrieve Google OAuth2 Access Token using key.json service account."""
+    now = int(time_module.time()) if 'time_module' in globals() else int(datetime.now().timestamp())
+    if _fcm_token_cache['token'] and _fcm_token_cache['expires_at'] > now + 60:
+        return _fcm_token_cache['token']
+
+    key_path = os.path.join(BASE_DIR, 'key.json')
+    if not os.path.exists(key_path):
+        return None
+
+    try:
+        with open(key_path, 'r', encoding='utf-8') as f:
+            key_data = json.load(f)
+
+        pem = key_data['private_key']
+        lines = [line for line in pem.split('\n') if line and not line.startswith('-----')]
+        der = base64.b64decode(''.join(lines))
+
+        def parse_der_tlv(der_bytes):
+            pos, items = 0, []
+            while pos < len(der_bytes):
+                tag, pos = der_bytes[pos], pos + 1
+                length, pos = der_bytes[pos], pos + 1
+                if length & 0x80:
+                    nb = length & 0x7f
+                    length = int.from_bytes(der_bytes[pos:pos+nb], 'big')
+                    pos += nb
+                val = der_bytes[pos:pos+length]
+                items.append((tag, length, val))
+                pos += length
+            return items
+
+        root_val = parse_der_tlv(der)[0][2]
+        pkcs8_children = parse_der_tlv(root_val)
+        rsa_seq_val = parse_der_tlv(pkcs8_children[2][2])[0][2]
+        rsa_integers = [int.from_bytes(v, 'big') for t, l, v in parse_der_tlv(rsa_seq_val) if t == 2]
+
+        n, d = rsa_integers[1], rsa_integers[3]
+
+        header = {'alg': 'RS256', 'typ': 'JWT'}
+        claims = {
+            'iss': key_data['client_email'],
+            'scope': 'https://www.googleapis.com/auth/firebase.messaging',
+            'aud': 'https://oauth2.googleapis.com/token',
+            'exp': now + 3600,
+            'iat': now
+        }
+
+        def b64url(data):
+            return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+        hp = b64url(json.dumps(header).encode()) + '.' + b64url(json.dumps(claims).encode())
+        digest_info = bytes.fromhex('3031300d060960864801650304020105000420') + hashlib.sha256(hp.encode('ascii')).digest()
+        pad_len = 256 - 3 - len(digest_info)
+        padded = b'\x00\x01' + (b'\xff' * pad_len) + b'\x00' + digest_info
+
+        sig_int = pow(int.from_bytes(padded, 'big'), d, n)
+        sig_bytes = sig_int.to_bytes(256, 'big')
+        jwt = hp + '.' + b64url(sig_bytes)
+
+        req_data = urllib.parse.urlencode({
+            'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion': jwt
+        }).encode('utf-8')
+
+        ctx = ssl.create_default_context()
+        req = urllib.request.Request(
+            'https://oauth2.googleapis.com/token',
+            data=req_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            res = json.loads(resp.read().decode('utf-8'))
+            access_token = res.get('access_token')
+            if access_token:
+                _fcm_token_cache['token'] = access_token
+                _fcm_token_cache['expires_at'] = now + int(res.get('expires_in', 3600))
+                return access_token
+    except Exception as e:
+        print(f"[!] Error generating Google OAuth2 token for FCM: {e}")
+    return None
+
+def send_fcm_notification(target_token, title, body, data_payload=None):
+    """Send high priority FCM v1 notification to an officer device token."""
+    if not target_token:
+        return False
+
+    oauth_token = get_google_oauth2_token()
+    if not oauth_token:
+        return False
+
+    url = 'https://fcm.googleapis.com/v1/projects/moi-mat-app/messages:send'
+    payload = {
+        'message': {
+            'token': target_token,
+            'notification': {
+                'title': title,
+                'body': body
+            },
+            'android': {
+                'priority': 'high',
+                'notification': {
+                    'sound': 'default',
+                    'visibility': 'public'
+                }
+            },
+            'webpush': {
+                'headers': {
+                    'Urgency': 'high'
+                },
+                'notification': {
+                    'title': title,
+                    'body': body,
+                    'icon': '/amman_logo.png',
+                    'vibrate': [200, 100, 200],
+                    'requireInteraction': True
+                }
+            }
+        }
+    }
+    if data_payload:
+        payload['message']['data'] = {str(k): str(v) for k, v in data_payload.items()}
+
+    try:
+        req_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=req_data,
+            headers={
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': f'Bearer {oauth_token}'
+            }
+        )
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        print(f"[!] FCM Push error: {e}")
+        return False
 
 # Ensure UTF-8 stdout encoding for Windows console
 if hasattr(sys.stdout, 'reconfigure'):
@@ -472,7 +618,7 @@ def init_db():
         if 'status' not in cols:
             c.execute("ALTER TABLE mat_file_custody_log ADD COLUMN status TEXT DEFAULT 'accepted'")
 
-        # Check if accessible_tools exists in mat_officers
+        # Check if accessible_tools and fcm_token exist in mat_officers
         cols = [row[1] for row in c.execute("PRAGMA table_info(mat_officers)").fetchall()]
         if 'accessible_tools' not in cols:
             c.execute("ALTER TABLE mat_officers ADD COLUMN accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,file_reservations,chat'")
@@ -480,6 +626,8 @@ def init_db():
             # Update existing users to have dashboard, file_reservations, and chat if missing
             c.execute("UPDATE mat_officers SET accessible_tools = 'dashboard,' || accessible_tools WHERE accessible_tools NOT LIKE '%dashboard%' AND accessible_tools IS NOT NULL AND accessible_tools != ''")
             c.execute("UPDATE mat_officers SET accessible_tools = accessible_tools || ',chat' WHERE accessible_tools NOT LIKE '%chat%' AND accessible_tools IS NOT NULL AND accessible_tools != ''")
+        if 'fcm_token' not in cols:
+            c.execute("ALTER TABLE mat_officers ADD COLUMN fcm_token TEXT")
 
         # Check if last_chat_seen exists in mat_sessions
         sess_cols = [row[1] for row in c.execute("PRAGMA table_info(mat_sessions)").fetchall()]
@@ -873,6 +1021,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/officers$', self.api_create_officer),
             (r'^/api/v1/mat/change-password$', self.api_change_password),
             (r'^/api/v1/mat/chat/message$', self.api_chat_post_message),
+            (r'^/api/v1/mat/save-fcm-token$', self.api_save_fcm_token),
             (r'^/api/v1/mat/reservations$', self.api_create_reservation),
             (r'^/api/v1/mat/reservations/transfer$', self.api_transfer_reservation),
             (r'^/api/v1/mat/reservations/respond$', self.api_respond_transfer),
@@ -1126,6 +1275,21 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         messages.reverse()
         self.send_json({'messages': messages, 'date': date_filter})
 
+    def api_save_fcm_token(self):
+        user = self.require_auth()
+        if not user:
+            return
+        data = self.read_json_body()
+        fcm_token = str(data.get('fcm_token') or '').strip()
+        if not fcm_token:
+            self.send_json({'error': 'رمز Tenebihat غير صالح'}, 400)
+            return
+        conn = get_db()
+        conn.execute("UPDATE mat_officers SET fcm_token = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (fcm_token, user['user_id']))
+        conn.commit()
+        conn.close()
+        self.send_json({'success': True, 'message': 'تم حفظ رمز التنبيهات بنجاح'})
+
     def api_chat_post_message(self):
         user = self.require_auth()
         if not user:
@@ -1149,6 +1313,27 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         chat_event.set()
         chat_event.clear()
         
+        # Dispatch FCM push notification to all other officers in background thread
+        def notify_officers(sender_id, sender_name, msg_text):
+            try:
+                conn_fcm = get_db()
+                other_officers = rows_to_list(conn_fcm.execute(
+                    "SELECT fcm_token FROM mat_officers WHERE id != ? AND fcm_token IS NOT NULL AND fcm_token != ''",
+                    (sender_id,)
+                ).fetchall())
+                conn_fcm.close()
+                for off in other_officers:
+                    send_fcm_notification(
+                        target_token=off['fcm_token'],
+                        title=f"رسالة جديدة من {sender_name}",
+                        body=msg_text,
+                        data_payload={'type': 'chat_message', 'url': '/complaints/app.html#chat'}
+                    )
+            except Exception as e_fcm:
+                print(f"[!] Error pushing chat notification: {e_fcm}")
+
+        threading.Thread(target=notify_officers, args=(user['user_id'], user['name'], message), daemon=True).start()
+
         self.send_json({'success': True})
 
     def api_chat_poll(self):

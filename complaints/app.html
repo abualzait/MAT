@@ -36,7 +36,7 @@
                     <h1 class="header-main-title">حقيبة الأدوات المساعدة</h1>
                     <p class="header-jurisdiction">
                         <span>محافظة العاصمة</span>
-                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.40.0</span>
+                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.41.0</span>
                     </p>
                 </div>
                 <button class="sidebar-close-btn" onclick="closeSidebarDrawer()" title="إغلاق القائمة" aria-label="إغلاق القائمة">
@@ -97,8 +97,9 @@
                         </button>
                         <!-- Notification Panel -->
                         <div id="notificationPanel" class="card" style="display: none; position: absolute; top: 100%; left: 0; width: 320px; z-index: 100; box-shadow: 0 10px 25px rgba(0,0,0,0.2); margin-top: 0.5rem; background:#ffffff; border:1px solid #cbd5e1;">
-                            <div class="card-header" style="padding: 1rem; background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
-                                <h3 style="font-size: 1rem; margin: 0; color:#0f172a;">🔔 الإشعارات الواردة</h3>
+                            <div class="card-header" style="padding: 0.75rem 1rem; background:#f1f5f9; border-bottom:1px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+                                <h3 style="font-size: 0.95rem; margin: 0; color:#0f172a;">🔔 الإشعارات الواردة</h3>
+                                <button id="enablePushBtn" class="btn btn-primary btn-sm" onclick="requestPushPermission()" style="font-size:0.75rem; padding:3px 8px;">📲 تفعيل الشاشة المغلقة</button>
                             </div>
                             <div id="notificationList" class="card-body" style="padding: 0; max-height: 300px; overflow-y: auto; color:#0f172a;">
                                 <div style="padding: 1rem; text-align: center; color: #64748b; font-size: 0.9rem;">لا توجد إشعارات حالياً</div>
@@ -888,9 +889,61 @@
         </div>
     </div>
 
+    <!-- Firebase SDKs for Push Notifications -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
+
     <!-- Leaflet JS & MAT Application Core Logic -->
     <script src="/leaflet.js"></script>
     <script src="/complaints/js/app.js?v=2026"></script>
+    
+    <script>
+      // Register Service Worker and manage FCM Push permissions
+      let messaging = null;
+      if ('serviceWorker' in navigator && 'Notification' in window) {
+        try {
+          firebase.initializeApp({
+            projectId: "moi-mat-app",
+            messagingSenderId: "111636101983678127810"
+          });
+          messaging = firebase.messaging();
+
+          navigator.serviceWorker.register('/firebase-messaging-sw.js').then((reg) => {
+            console.log('[SW] Registered successfully:', reg.scope);
+          }).catch((err) => console.warn('[SW] Registration failed:', err));
+        } catch (e) {
+          console.warn('[FCM] Initialization warning:', e);
+        }
+      }
+
+      async function requestPushPermission() {
+        if (!messaging) {
+          alert("تنبيه: التنبيهات المنبثقة غير مدعومة مباشرة في متصفحك أو تتطلب الاتصال بشبكة آمنة (HTTPS).");
+          return;
+        }
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            const reg = await navigator.serviceWorker.ready;
+            const token = await messaging.getToken({ serviceWorkerRegistration: reg });
+            if (token) {
+              await fetch('/api/v1/mat/save-fcm-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fcm_token: token })
+              });
+              alert("✅ تم تفعيل إشعارات الشاشة المغلقة بنجاح! ستصلك تنبيهات المحادثات فوراً.");
+              const btn = document.getElementById('enablePushBtn');
+              if (btn) btn.innerText = '✅ الشاشة المغلقة مفعلة';
+            }
+          } else {
+            alert("⚠️ تم رفض إذن الإشعارات من المتصفح.");
+          }
+        } catch (err) {
+          console.error("Error requesting push permission:", err);
+        }
+      }
+    </script>
 </body>
 
 </html>

@@ -740,7 +740,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         # Serve app / mat_complaints
-        if path == '/complaints/' or path == '/complaints/app':
+        if path in ('/complaints/', '/complaints/app', '/complaints/app.html', '/app', '/app.html'):
             user = self.get_current_user()
             if not user:
                 self.serve_file('complaints/login.html')
@@ -748,7 +748,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 self.serve_file('complaints/app.html')
             return
 
-        if path == '/complaints/login' or path == '/login':
+        if path in ('/complaints/login', '/complaints/login.html', '/login', '/login.html'):
             user = self.get_current_user()
             if user:
                 self.send_response(302)

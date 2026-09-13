@@ -270,13 +270,15 @@
         async function handleLogin(e) {
             if (e) e.preventDefault();
             const username = document.getElementById('selectedUsername').value;
-            const secret_code = document.getElementById('secretCode').value || '12345';
+            const secret_code = (document.getElementById('secretCode').value || '').trim();
 
             if (!username) return;
 
             const user = defaultUsersMap[username] || { username, name: username, role: 'officer' };
-            if (secret_code === '123' || secret_code === '12345' || secret_code === 'admin') {
+            if (secret_code === '12345' || secret_code === 'admin') {
                 localStorage.setItem('adminModeActive', 'true');
+            } else {
+                localStorage.removeItem('adminModeActive');
             }
 
             try {

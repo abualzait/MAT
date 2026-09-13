@@ -961,9 +961,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         is_admin_mode = False
-        if secret_code in ('123', '12345', 'admin'):
-            is_admin_mode = True
-        elif secret_code:
+        if secret_code:
             try:
                 digits = [int(d) for d in secret_code if d.isdigit()]
                 if digits and sum(digits) == 14:

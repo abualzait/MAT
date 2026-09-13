@@ -1,22 +1,11 @@
----
-title: MAT - Amman Police Stations Toolkit
-emoji: 🏛️
-colorFrom: blue
-colorTo: indigo
-sdk: static
-pinned: false
-license: mit
----
-
 # MAT — حقيبة الأدوات المساعدة
 ### Modular Assistant Toolkit
 
 > **Official Arabic Name:** "حقيبة الأدوات المساعدة"  
 > **Full Acronym Definition:** Modular Assistant Toolkit  
-> **Project Version:** 1.30.0  
+> **Project Version:** 1.40.0  
 > **Official Short URL:** [https://abualzait.github.io/MAT](https://abualzait.github.io/MAT)  
-> **Hugging Face Live Space:** [https://abualzait-mat.hf.space](https://abualzait-mat.hf.space)  
-> **Direct Live Deployment:** [https://mat-ee756.containers.snapdeploy.app](https://mat-ee756.containers.snapdeploy.app)  
+> **Google Cloud Run Live URL:** [https://mat-toolkit-436287854556.europe-west1.run.app](https://mat-toolkit-436287854556.europe-west1.run.app)  
 > **Cloud Secret Key:** `mat_secret_key_2026_prod`
 
 ---

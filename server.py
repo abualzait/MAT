@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.30.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.40.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -664,10 +664,31 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── Response helpers ──────────────────────────────────────
 
+    def do_OPTIONS(self):
+        """Handle CORS preflight OPTIONS requests."""
+        self.send_response(200)
+        origin = self.headers.get('Origin')
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+        else:
+            self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization, Cookie')
+        self.end_headers()
+
     def send_json(self, data, status=200, cookie=None):
         """Send JSON response."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        origin = self.headers.get('Origin')
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+        else:
+            self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization, Cookie')
         if cookie:
             if isinstance(cookie, list):
                 for c in cookie:

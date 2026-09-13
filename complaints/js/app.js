@@ -13,7 +13,7 @@ let currentUser = null;
 
 // ── Smart API Backend Routing & CSRF Setup ────────────────────
 const BACKEND_HOST = (typeof window !== 'undefined' && (window.location.hostname.includes('hf.space') || window.location.hostname.includes('github.io'))) 
-    ? 'https://mat-ee756.containers.snapdeploy.app' 
+    ? 'https://abualzait-mat.hf.space' 
     : '';
 
 const originalFetch = window.fetch;
@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check Authentication
     const user = await checkAuth();
     if (!user) {
-        window.location.href = '/login';
+        window.location.href = './login.html';
         return;
     }
 
@@ -59,10 +59,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Default tab: Dashboard for all users
     switchTab('dashboard');
     
-    // Start notifications & online users polling
+    // Start notifications & online users polling & keep-alive ping
     startNotificationsPolling();
     loadOnlineUsers();
     setInterval(loadOnlineUsers, 10000);
+    setInterval(() => {
+        if (BACKEND_HOST) {
+            fetch('/api/v1/mat/active-users').catch(() => {});
+        }
+    }, 45000);
 
     // Setup Sidebar Hover Expansion for Collapsed State
     const sidebarEl = document.getElementById('mainSidebar');
@@ -83,10 +88,19 @@ async function checkAuth() {
     try {
         const res = await fetch('/api/v1/mat/me');
         if (res.ok) {
-            return await res.json();
+            const user = await res.json();
+            if (user && user.username) {
+                localStorage.setItem('mat_current_user', JSON.stringify(user));
+                return user;
+            }
         }
-    } catch (e) {
-        console.error('Auth check failed:', e);
+    } catch (e) {}
+
+    const savedUser = localStorage.getItem('mat_current_user');
+    if (savedUser) {
+        try {
+            return JSON.parse(savedUser);
+        } catch (e) {}
     }
     return null;
 }
@@ -312,7 +326,9 @@ async function logout() {
     try {
         await fetch('/api/v1/mat/logout', { method: 'POST' });
     } catch (e) {}
-    window.location.href = '/login';
+    localStorage.removeItem('mat_current_user');
+    localStorage.removeItem('adminModeActive');
+    window.location.href = './login.html';
 }
 
 function toggleNavGroup(headerElem) {
@@ -361,8 +377,8 @@ function switchTab(tabId) {
     // Trigger tab-specific data load
     if (tabId === 'stations') {
         const iframe = document.getElementById('stationsIframe');
-        if (iframe && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes('police-stations'))) {
-            iframe.src = '/police-stations?embedded=true';
+        if (iframe && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes('Police_Station_Finder'))) {
+            iframe.src = '../Police_Station_Finder.html';
         }
     } else if (tabId === 'appointments') {
         loadSimpleAppointments();

@@ -181,7 +181,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
     const hasDashboard = isAdmin || tools.includes('dashboard');
     const hasComplaints = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints');
     const hasFinder = isAdmin || tools.includes('finder') || tools.includes('stations');
-    const hasFiles = isAdmin || tools.includes('file_reservations') || tools.includes('reservations') || role === 'officer';
+    const hasFiles = isAdmin || tools.includes('file_reservations') || tools.includes('reservations');
     const hasChat = isAdmin || tools.includes('chat');
     const hasAdminPerms = isAdmin || tools.includes('admin_permissions') || localStorage.getItem('adminModeActive') === 'true';
 
@@ -201,7 +201,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </div>`;
     }
 
-    // Group 1: Appointments (Expanded by default so sub-items and icons are visible)
+    // Group 1: Appointments
     if (hasComplaints) {
         toolsCount++;
         toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. نظام المواعيد</strong> 📅</li>`;
@@ -218,7 +218,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </button>`).join('');
 
         html += `
-            <div class="nav-group expanded">
+            <div class="nav-group">
                 <button class="nav-group-header" onclick="toggleNavGroup(this)" title="نظام المواعيد">
                     <div class="nav-header-left"><span class="nav-icon">📅</span><span class="nav-text">نظام المواعيد</span></div>
                     <span class="nav-chevron">▼</span>
@@ -258,7 +258,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
             </div>`;
     }
 
-    // Group 3: Settings & System Administration (Expanded by default when present)
+    // Group 3: Settings & System Administration
     if (hasAdminPerms) {
         let adminSubItems = [];
         if (isAdmin || role === 'admin') {
@@ -285,7 +285,7 @@ function renderDynamicNavigation(tools, isAdmin, role) {
                 </button>`).join('');
 
             html += `
-                <div class="nav-group expanded">
+                <div class="nav-group">
                     <button class="nav-group-header" onclick="toggleNavGroup(this)" title="إدارة النظام">
                         <div class="nav-header-left"><span class="nav-icon">🛡️</span><span class="nav-text">إدارة النظام</span></div>
                         <span class="nav-chevron">▼</span>

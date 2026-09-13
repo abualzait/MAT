@@ -13,7 +13,7 @@ let currentUser = null;
 
 // ── Smart API Backend Routing & CSRF Setup ────────────────────
 const BACKEND_HOST = (typeof window !== 'undefined' && (window.location.hostname.includes('hf.space') || window.location.hostname.includes('github.io'))) 
-    ? 'https://abualzait-mat.hf.space' 
+    ? 'https://mat-toolkit-436287854556.europe-west1.run.app' 
     : '';
 
 const originalFetch = window.fetch;

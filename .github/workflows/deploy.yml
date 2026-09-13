@@ -1,0 +1,39 @@
+name: Deploy MAT to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: moi-mat-app
+  REGION: europe-west1
+  SERVICE_NAME: mat-toolkit
+
+jobs:
+  deploy:
+    name: Build & Deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run from Source
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --project ${{ env.PROJECT_ID }} \
+            --region ${{ env.REGION }} \
+            --source . \
+            --port 8080 \
+            --allow-unauthenticated \
+            --set-env-vars "MAT_ENV=production,MAT_HOST=0.0.0.0,MAT_SECRET_KEY=mat_secret_key_2026_prod"

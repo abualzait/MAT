@@ -931,8 +931,8 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def api_login(self):
         data = self.read_json_body()
-        username = data.get('username', '').strip()
-        secret_code = data.get('secret_code', '').strip()
+        username = str(data.get('username') or '').strip()
+        secret_code = str(data.get('secret_code') or data.get('password') or data.get('code') or '').strip()
 
         if not username:
             self.send_json({'error': 'يرجى اختيار المستخدم'}, 400)

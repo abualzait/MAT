@@ -290,7 +290,7 @@
                 const res = await fetch('/api/v1/mat/login', {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ username: username, password: secret_code })
+                    body: JSON.stringify({ username: username, secret_code: secret_code, password: secret_code })
                 });
                 if (res.ok) {
                     const data = await res.json();

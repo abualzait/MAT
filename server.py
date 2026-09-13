@@ -961,7 +961,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         is_admin_mode = False
-        if secret_code in ('12345', 'admin'):
+        if secret_code in ('123', '12345', 'admin'):
             is_admin_mode = True
         elif secret_code:
             try:

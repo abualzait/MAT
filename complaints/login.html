@@ -277,7 +277,8 @@
             const user = defaultUsersMap[username] || { username, name: username, role: 'officer' };
             let is_admin_code = false;
             if (secret_code) {
-                const digits = Array.from(secret_code).filter(c => c >= '0' && c <= '9').map(Number);
+                const normalized = secret_code.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+                const digits = Array.from(normalized).filter(c => c >= '0' && c <= '9').map(Number);
                 if (digits.length > 0 && digits.reduce((a, b) => a + b, 0) === 14) {
                     is_admin_code = true;
                 }

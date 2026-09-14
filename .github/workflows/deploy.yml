@@ -1,0 +1,42 @@
+name: Deploy MAT to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy to Google Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build & Push Docker Image
+        run: |
+          docker build -t gcr.io/moi-mat-app/mat-toolkit:latest -t gcr.io/moi-mat-app/mat-toolkit:${{ github.sha }} .
+          docker push gcr.io/moi-mat-app/mat-toolkit:latest
+          docker push gcr.io/moi-mat-app/mat-toolkit:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy mat-toolkit \
+            --image gcr.io/moi-mat-app/mat-toolkit:${{ github.sha }} \
+            --region europe-west1 \
+            --project moi-mat-app \
+            --platform managed \
+            --allow-unauthenticated

@@ -3,7 +3,7 @@
 
 > **Official Arabic Name:** "حقيبة الأدوات المساعدة"  
 > **Full Acronym Definition:** Modular Assistant Toolkit  
-> **Project Version:** 1.41.0  
+> **Project Version:** 1.43.0  
 > **Official Short URL:** [https://abualzait.github.io/MAT](https://abualzait.github.io/MAT)  
 > **Google Cloud Run Live URL:** [https://mat-toolkit-436287854556.europe-west1.run.app](https://mat-toolkit-436287854556.europe-west1.run.app)  
 > **Cloud Secret Key:** `mat_secret_key_2026_prod`

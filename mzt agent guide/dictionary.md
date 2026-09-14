@@ -12,11 +12,11 @@
 
 ## Database Schema Overview (`complaints.db`)
 
-1. **`mat_officers`**: User accounts and administrative roles (`admin`, `officer`, `caller`).
+1. **`mat_officers`**: User accounts, administrative roles (`admin`, `officer`, `caller`), accessible tools list, and device FCM tokens (`fcm_token`) for push notifications.
 2. **`mat_complaints`**: Citizen complaint records, status tracking, and case files.
 3. **`mat_parties`**: Complainants, respondents, and associated party details.
 4. **`mat_appointments` / `mat_simple_appointments`**: Call logs, visitor meetings, dates, times, and status.
 5. **`mat_reserved_files`**: Physical file reservations, current custody owner, and custody history logs (`mat_file_custody_log`).
-6. **`mat_chat_messages`**: Real-time internal team messaging records.
+6. **`mat_chat_messages`**: Real-time internal team messaging records with instant FCM push dispatch.
 7. **`mat_search_logs`**: Metrics and search queries logged from the GIS Police Station Finder.
 8. **`mat_sessions`**: Active authentication tokens and user sessions.

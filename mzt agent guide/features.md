@@ -1,6 +1,6 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.41.0)
+## Current Features (Version 1.43.0)
 
 1. **Complaints & Cases Management (`/complaints/app`):**
    - Record, view, and process citizen complaints and administrative cases.
@@ -20,9 +20,13 @@
    - Search by Amman area, neighborhood, street, or landmark.
    - Locate nearest police station and view contact numbers & administrative details.
 
-5. **Internal Meeting Room & Live Chat:**
-   - Real-time team messaging with unread notification badge and push support.
+5. **Internal Meeting Room & FCM Push Notifications:**
+   - Real-time team messaging with unread notification badge.
+   - Firebase Cloud Messaging (FCM v1) background & lock screen push notifications for browser & mobile devices via `/firebase-messaging-sw.js` and `/api/v1/mat/save-fcm-token`.
 
 6. **Role-Based Access Control & Secret Key Support:**
    - Multi-role permissions (`admin`, `officer`, `caller`).
    - Emergency secret key override for admin privileges.
+
+7. **Dashboard Quick Shortcuts:**
+   - Direct header action shortcuts for "حجز موعد جديد", "مواعيد اليوم", and "دليل المراكز الأمنية".

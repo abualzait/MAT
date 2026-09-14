@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.41.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.43.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -1333,6 +1333,24 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"[!] Error pushing chat notification: {e_fcm}")
 
         threading.Thread(target=notify_officers, args=(user['user_id'], user['name'], message), daemon=True).start()
+
+        self.send_json({'success': True})
+
+    def api_save_fcm_token(self):
+        user = self.require_auth()
+        if not user:
+            return
+
+        data = self.read_json_body()
+        fcm_token = data.get('fcm_token', '').strip()
+        if not fcm_token:
+            self.send_json({'error': 'رمز FCM مطلوب'}, 400)
+            return
+
+        conn = get_db()
+        conn.execute("UPDATE mat_officers SET fcm_token = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (fcm_token, user['user_id']))
+        conn.commit()
+        conn.close()
 
         self.send_json({'success': True})
 

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.44.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.0)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -2373,9 +2373,8 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         appt_date = data.get('appointment_date', '').strip()
         appt_time = data.get('appointment_time', '').strip()
 
-        if not case_number or not visitor_name or not appt_date or not appt_time:
-            self.send_json({'error': 'يرجى إدخال رقم القضية/الصادر، اسم المراجع، والتاريخ والوقت'}, 400)
-            return
+        # Mandatory fields validation removed as per request.
+        pass
 
         phone = data.get('phone', '').strip()
         national_id = data.get('national_id', '').strip()

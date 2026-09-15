@@ -2606,4 +2606,20 @@ input:checked + .slider:before {
   .form-row .form-group {
     min-width: 100%;
   }
+  
+  /* Fix chat widget overflow on mobile */
+  .chat-widget {
+    left: 10px !important;
+    right: 10px !important;
+    bottom: 10px !important;
+    width: auto !important;
+    max-width: none !important;
+    height: 450px !important;
+    max-height: calc(100vh - 20px) !important;
+  }
+
+  /* Prevent iOS zoom on focus by ensuring font-size is at least 16px */
+  input, select, textarea, .form-control, .chat-input-area input {
+    font-size: 16px !important;
+  }
 }

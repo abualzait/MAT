@@ -659,7 +659,9 @@ function openNewSimpleAppointmentModal(parentAppt = null) {
     // Default date & time: tomorrow at 10:00 AM
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('simpleDate').value = tomorrow.toISOString().split('T')[0];
+    const tzOffset = tomorrow.getTimezoneOffset() * 60000; // in milliseconds
+    const ammanDate = new Date(tomorrow.getTime() - tzOffset).toISOString().split('T')[0];
+    document.getElementById('simpleDate').value = ammanDate;
     document.getElementById('simpleTime').value = '10:00';
 
     loadOfficersForDropdown();

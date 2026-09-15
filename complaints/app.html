@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
 
     <!-- Civic Horizon CSS Design System -->
-    <link rel="stylesheet" href="/complaints/css/design-system.css?v=21">
+    <link rel="stylesheet" href="/complaints/css/design-system.css?v=22">
     
     <!-- Leaflet CSS for unified map -->
     <link rel="stylesheet" href="/leaflet.css">
@@ -911,6 +911,29 @@
             messagingSenderId: "111636101983678127810"
           });
           messaging = firebase.messaging();
+          
+          messaging.onMessage((payload) => {
+            console.log('[FCM] Message received in foreground:', payload);
+            if (payload.notification) {
+                const title = payload.notification.title;
+                const options = {
+                    body: payload.notification.body,
+                    icon: '/amman_logo.png'
+                };
+                if (Notification.permission === 'granted') {
+                    new Notification(title, options);
+                }
+                if (typeof window.showToast === 'function') {
+                    window.showToast(title + ' - ' + payload.notification.body, false);
+                }
+            }
+            // If chat message, immediately refresh chat if open
+            if (payload.data && payload.data.type === 'chat_message') {
+                if (window.chatPollActive && typeof window.pollChatMessages === 'function') {
+                    window.pollChatMessages();
+                }
+            }
+          });
 
           navigator.serviceWorker.register('/firebase-messaging-sw.js').then((reg) => {
             console.log('[SW] Registered successfully:', reg.scope);

@@ -954,11 +954,18 @@
         if (!messaging) return;
         try {
           const reg = await navigator.serviceWorker.ready;
+          // In FCM v9+, getting a token without VAPID key may fallback to legacy senderId or fail depending on browser.
           const token = await messaging.getToken({ serviceWorkerRegistration: reg });
           if (token) {
+            const authToken = localStorage.getItem('mat_token');
+            if (!authToken) return; // Cannot save token without user session
+            
             await fetch('/api/v1/mat/save-fcm-token', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken
+              },
               body: JSON.stringify({ fcm_token: token })
             });
             console.log('[FCM] Token synced successfully');
@@ -969,12 +976,19 @@
       }
 
       async function requestPushPermission(silent = false) {
-        if (!messaging || fcmPermissionRequested) return;
-        fcmPermissionRequested = true;
+        if (!messaging) return;
+        // Don't re-prompt if already requested this session and it's an auto-trigger
+        if (fcmPermissionRequested && silent) return;
+        
+        // Only mark as requested if this was an explicit manual action
+        if (!silent) fcmPermissionRequested = true;
 
         try {
           if (Notification.permission === 'granted') {
             await syncFcmTokenSilent();
+            if (!silent && typeof window.showToast === 'function') {
+                window.showToast('الإشعارات مفعلة بالفعل', true);
+            }
             return;
           }
 
@@ -984,8 +998,13 @@
               await syncFcmTokenSilent();
               if (!silent) {
                 console.log('✅ Lock screen notifications activated');
+                if (typeof window.showToast === 'function') window.showToast('تم تفعيل الإشعارات بنجاح', true);
               }
             }
+          } else {
+             if (!silent && typeof window.showToast === 'function') {
+                window.showToast('تم حظر الإشعارات من إعدادات المتصفح', false);
+             }
           }
         } catch (err) {
           console.error("Push permission error:", err);

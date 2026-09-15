@@ -144,10 +144,9 @@ def download_single_tile(tile):
         
     os.makedirs(zoom_dir, exist_ok=True)
     
-    # CartoDB Voyager tile servers (high performance, no 403 blocks)
-    subdomains = ['a', 'b', 'c', 'd']
-    subdomain = subdomains[(x + y) % len(subdomains)]
-    url = f"https://{subdomain}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+    # OpenStreetMap standard tile servers
+    subdomain = random.choice(['a', 'b', 'c'])
+    url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
     
     req = urllib.request.Request(url, headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

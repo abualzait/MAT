@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.0)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.1)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -1304,8 +1304,12 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({'error': 'رسالة فارغة'}, 400)
             return
             
+        from datetime import datetime, timedelta, timezone
+        amman_tz = timezone(timedelta(hours=3))
+        now_amman = datetime.now(amman_tz).strftime('%Y-%m-%d %H:%M:%S')
+
         conn = get_db()
-        conn.execute("INSERT INTO mat_chat_messages (user_id, message) VALUES (?, ?)", (user['user_id'], message))
+        conn.execute("INSERT INTO mat_chat_messages (user_id, message, created_at) VALUES (?, ?, ?)", (user['user_id'], message, now_amman))
         conn.commit()
         conn.close()
         

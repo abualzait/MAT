@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.1)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.2)  ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -206,7 +206,7 @@ if not os.path.exists(_data_dir):
     except Exception:
         _data_dir = BASE_DIR
 
-_default_db = os.path.join(_data_dir, 'mat_complaints.db')
+_default_db = os.path.join(BASE_DIR, 'mat_complaints.db')
 MAT_DB_PATH = os.environ.get('MAT_DB_PATH', _default_db)
 MAT_API_PREFIX = os.environ.get('MAT_API_PREFIX', '/api/v1/mat')
 MAT_SECRET_KEY = os.environ.get('MAT_SECRET_KEY', 'mat_secret_key_2026')
@@ -308,7 +308,7 @@ def sync_postponed_appointments(conn):
 
 
 
-BACKUP_JSON_PATH = os.path.join(BASE_DIR, 'data_backup.json')
+BACKUP_JSON_PATH = os.path.join(_data_dir, 'data_backup.json')
 
 
 def backup_db_to_json(conn=None):
@@ -323,10 +323,17 @@ def backup_db_to_json(conn=None):
     try:
         data = {
             'officers': rows_to_list(conn.execute("SELECT * FROM mat_officers").fetchall()),
+            'complaints': rows_to_list(conn.execute("SELECT * FROM mat_complaints").fetchall()),
+            'parties': rows_to_list(conn.execute("SELECT * FROM mat_parties").fetchall()),
+            'appointments': rows_to_list(conn.execute("SELECT * FROM mat_appointments").fetchall()),
+            'appointment_parties': rows_to_list(conn.execute("SELECT * FROM mat_appointment_parties").fetchall()),
             'simple_appointments': rows_to_list(conn.execute("SELECT * FROM mat_simple_appointments").fetchall()),
             'reserved_files': rows_to_list(conn.execute("SELECT * FROM mat_reserved_files").fetchall()),
             'file_custody_log': rows_to_list(conn.execute("SELECT * FROM mat_file_custody_log").fetchall()),
             'search_logs': rows_to_list(conn.execute("SELECT * FROM mat_search_logs").fetchall()),
+            'chat_messages': rows_to_list(conn.execute("SELECT * FROM mat_chat_messages").fetchall()),
+            'activity_log': rows_to_list(conn.execute("SELECT * FROM mat_activity_log").fetchall()),
+            'audit_logs': rows_to_list(conn.execute("SELECT * FROM mat_audit_logs").fetchall()),
             'updated_at': datetime.now().isoformat()
         }
         with open(BACKUP_JSON_PATH, 'w', encoding='utf-8') as f:
@@ -389,6 +396,85 @@ def restore_db_from_json(conn):
                     INSERT INTO mat_file_custody_log (id, reserved_file_id, from_officer_id, to_officer_id, status, notes, transferred_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (l.get('id'), l.get('reserved_file_id'), l.get('from_officer_id'), l.get('to_officer_id'), l.get('status'), l.get('notes'), l.get('transferred_at')))
+        # Restore Complaints
+        complaints = data.get('complaints', [])
+        for c in complaints:
+            existing = conn.execute("SELECT id FROM mat_complaints WHERE id = ?", (c['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_complaints (id, complaint_number, subject, complaint_type, status, priority, notes, assigned_officer_id, created_by_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (c.get('id'), c.get('complaint_number'), c.get('subject'), c.get('complaint_type'), c.get('status'), c.get('priority'), c.get('notes'), c.get('assigned_officer_id'), c.get('created_by_id'), c.get('created_at'), c.get('updated_at')))
+
+        # Restore Parties
+        parties = data.get('parties', [])
+        for p in parties:
+            existing = conn.execute("SELECT id FROM mat_parties WHERE id = ?", (p['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_parties (id, complaint_id, party_type, name, phone, national_id, address, notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (p.get('id'), p.get('complaint_id'), p.get('party_type'), p.get('name'), p.get('phone'), p.get('national_id'), p.get('address'), p.get('notes'), p.get('created_at')))
+
+        # Restore Appointments
+        appointments = data.get('appointments', [])
+        for a in appointments:
+            existing = conn.execute("SELECT id FROM mat_appointments WHERE id = ?", (a['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_appointments (id, complaint_id, appointment_date, appointment_time, appointment_type, status, location, notes, requested_by_id, parent_appointment_id, created_by_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (a.get('id'), a.get('complaint_id'), a.get('appointment_date'), a.get('appointment_time'), a.get('appointment_type'), a.get('status'), a.get('location'), a.get('notes'), a.get('requested_by_id'), a.get('parent_appointment_id'), a.get('created_by_id'), a.get('created_at')))
+
+        # Restore Appointment Parties
+        appt_parties = data.get('appointment_parties', [])
+        for ap in appt_parties:
+            existing = conn.execute("SELECT id FROM mat_appointment_parties WHERE id = ?", (ap['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_appointment_parties (id, appointment_id, party_id, call_status, called_at, called_by_id, attendance, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (ap.get('id'), ap.get('appointment_id'), ap.get('party_id'), ap.get('call_status'), ap.get('called_at'), ap.get('called_by_id'), ap.get('attendance'), ap.get('notes')))
+
+        # Restore Search Logs
+        search_logs = data.get('search_logs', [])
+        for sl in search_logs:
+            existing = conn.execute("SELECT id FROM mat_search_logs WHERE id = ?", (sl['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_search_logs (id, area_name, closest_station, directorate, search_count, last_searched_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (sl.get('id'), sl.get('area_name'), sl.get('closest_station'), sl.get('directorate'), sl.get('search_count'), sl.get('last_searched_at')))
+
+        # Restore Chat Messages
+        chat_messages = data.get('chat_messages', [])
+        for cm in chat_messages:
+            existing = conn.execute("SELECT id FROM mat_chat_messages WHERE id = ?", (cm['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_chat_messages (id, user_id, message, created_at)
+                    VALUES (?, ?, ?, ?)
+                """, (cm.get('id'), cm.get('user_id'), cm.get('message'), cm.get('created_at')))
+
+        # Restore Activity Log
+        activity_logs = data.get('activity_log', [])
+        for al in activity_logs:
+            existing = conn.execute("SELECT id FROM mat_activity_log WHERE id = ?", (al['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_activity_log (id, user_id, action, entity_type, entity_id, details, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (al.get('id'), al.get('user_id'), al.get('action'), al.get('entity_type'), al.get('entity_id'), al.get('details'), al.get('created_at')))
+
+        # Restore Audit Logs
+        audit_logs = data.get('audit_logs', [])
+        for au in audit_logs:
+            existing = conn.execute("SELECT id FROM mat_audit_logs WHERE id = ?", (au['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_audit_logs (id, action, resource_id, actor_id, timestamp, details)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (au.get('id'), au.get('action'), au.get('resource_id'), au.get('actor_id'), au.get('timestamp'), au.get('details')))
 
         conn.commit()
     except Exception as e:

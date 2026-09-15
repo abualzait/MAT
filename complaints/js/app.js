@@ -1792,7 +1792,30 @@ function appendChatMessages(messages) {
                 <div class="text">${m.message}</div>
             </div>
         `;
-        if (m.id > lastMessageId) lastMessageId = m.id;
+        if (m.id > lastMessageId) {
+            lastMessageId = m.id;
+            // Play sound and show notification if not from self and notifications are enabled
+            if (!isSelf && window.localNotificationsEnabled) {
+                playNotificationSound();
+                if (Notification.permission === "granted") {
+                    try {
+                        const notif = new Notification(`رسالة من ${m.user_name}`, {
+                            body: m.message,
+                            icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png'
+                        });
+                        notif.onclick = function() {
+                            window.focus();
+                            const chatPane = document.getElementById('chatPane');
+                            if (chatPane && !chatPane.classList.contains('active')) {
+                                toggleChatPane();
+                            }
+                        };
+                    } catch(err) {
+                        console.error('Notification error:', err);
+                    }
+                }
+            }
+        }
     });
     
     container.insertAdjacentHTML('beforeend', html);
@@ -2708,4 +2731,45 @@ function viewRegisteredTodayAppointments() {
     window.filterRegisteredToday = true;
     // Load the appointments
     loadSimpleAppointments();
+}
+
+// ── Local Notifications ─────────────────────────
+function enableLocalNotifications() {
+    if (!("Notification" in window)) {
+        showToast("متصفحك لا يدعم الإشعارات", true);
+        return;
+    }
+    Notification.requestPermission().then(permission => {
+        if (permission === "granted") {
+            window.localNotificationsEnabled = true;
+            showToast("تم تفعيل الإشعارات الصوتية والمحلية بنجاح!");
+            const btn = document.getElementById('btnEnableNotifications');
+            if (btn) {
+                btn.style.background = 'rgba(40, 167, 69, 0.5)';
+                btn.innerText = '🔔 مفعلة';
+            }
+        } else {
+            showToast("تم رفض صلاحية الإشعارات من المتصفح", true);
+        }
+    });
+}
+
+function playNotificationSound() {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+        oscillator.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.1); // go up
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.05);
+        gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {
+        console.error("Error playing sound:", e);
+    }
 }

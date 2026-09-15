@@ -1797,7 +1797,16 @@ function appendChatMessages(messages) {
             // Play sound and show notification if not from self and notifications are enabled
             if (!isSelf && window.localNotificationsEnabled) {
                 playNotificationSound();
-                if (Notification.permission === "granted") {
+                
+                const chatPane = document.getElementById('chatPane');
+                const isChatOpen = chatPane && chatPane.classList.contains('active');
+                
+                // Always show an in-app toast if chat is closed, even if native notifications fail
+                if (!isChatOpen) {
+                    showToast(`رسالة جديدة من ${m.user_name}: ${m.message.length > 25 ? m.message.substring(0, 25) + '...' : m.message}`);
+                }
+
+                if ("Notification" in window && Notification.permission === "granted") {
                     try {
                         const notif = new Notification(`رسالة من ${m.user_name}`, {
                             body: m.message,
@@ -1805,8 +1814,7 @@ function appendChatMessages(messages) {
                         });
                         notif.onclick = function() {
                             window.focus();
-                            const chatPane = document.getElementById('chatPane');
-                            if (chatPane && !chatPane.classList.contains('active')) {
+                            if (!isChatOpen) {
                                 toggleChatPane();
                             }
                         };
@@ -2735,23 +2743,26 @@ function viewRegisteredTodayAppointments() {
 
 // ── Local Notifications ─────────────────────────
 function enableLocalNotifications() {
-    if (!("Notification" in window)) {
-        showToast("متصفحك لا يدعم الإشعارات", true);
-        return;
+    // Always enable the custom in-app notifications (Toasts and Sounds)
+    window.localNotificationsEnabled = true;
+    showToast("تم تفعيل الإشعارات الصوتية والمحلية بنجاح!");
+    
+    const btn = document.getElementById('btnEnableNotifications');
+    if (btn) {
+        btn.style.background = 'rgba(40, 167, 69, 0.5)';
+        btn.innerText = '🔔 مفعلة';
     }
-    Notification.requestPermission().then(permission => {
-        if (permission === "granted") {
-            window.localNotificationsEnabled = true;
-            showToast("تم تفعيل الإشعارات الصوتية والمحلية بنجاح!");
-            const btn = document.getElementById('btnEnableNotifications');
-            if (btn) {
-                btn.style.background = 'rgba(40, 167, 69, 0.5)';
-                btn.innerText = '🔔 مفعلة';
+
+    // Try to request native OS/Browser permissions if supported
+    if ("Notification" in window) {
+        Notification.requestPermission().then(permission => {
+            if (permission !== "granted") {
+                console.warn("Native notifications denied, but in-app toasts will still work.");
             }
-        } else {
-            showToast("تم رفض صلاحية الإشعارات من المتصفح", true);
-        }
-    });
+        }).catch(err => {
+            console.error("Native notification request failed:", err);
+        });
+    }
 }
 
 function playNotificationSound() {

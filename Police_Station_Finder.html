@@ -844,7 +844,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.3</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.4</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -34971,11 +34971,11 @@
                     var tile = document.createElement('img');
                     L.DomEvent.on(tile, 'load', L.bind(this._tileOnLoad, this, done, tile));
                     L.DomEvent.on(tile, 'error', L.bind(function () {
-                        var cartoUrl = 'https://' + ('abcd'[Math.abs(coords.x + coords.y) % 4]) + '.basemaps.cartocdn.com/rastertiles/voyager/' + coords.z + '/' + coords.x + '/' + coords.y + '.png';
+                        var osmUrl = 'https://' + ('abc'[Math.abs(coords.x + coords.y) % 3]) + '.tile.openstreetmap.org/' + coords.z + '/' + coords.x + '/' + coords.y + '.png';
                         var esriUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/' + coords.z + '/' + coords.y + '/' + coords.x;
-                        if (tile.src.indexOf('cartocdn.com') === -1 && tile.src.indexOf('arcgisonline.com') === -1 && navigator.onLine) {
-                            tile.src = cartoUrl;
-                        } else if (tile.src.indexOf('cartocdn.com') !== -1 && navigator.onLine && tile.src.indexOf('arcgisonline.com') === -1) {
+                        if (tile.src.indexOf('openstreetmap.org') === -1 && tile.src.indexOf('arcgisonline.com') === -1 && navigator.onLine) {
+                            tile.src = osmUrl;
+                        } else if (tile.src.indexOf('openstreetmap.org') !== -1 && navigator.onLine && tile.src.indexOf('arcgisonline.com') === -1) {
                             tile.src = esriUrl;
                         } else if (tile.src.indexOf('offline_tile.svg') === -1 && tile.src.indexOf('offline_tile.png') === -1) {
                             tile.src = 'tiles/offline_tile.svg';

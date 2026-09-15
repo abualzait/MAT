@@ -566,6 +566,10 @@ async function loadSimpleAppointments() {
         let url = `/api/v1/mat/simple-appointments?from=${encodeURIComponent(fromDate)}`;
         if (toDate) url += `&to=${encodeURIComponent(toDate)}`;
         if (status) url += `&status=${encodeURIComponent(status)}`;
+        if (window.filterRegisteredToday) {
+            url += '&registered_today=1';
+            window.filterRegisteredToday = false;
+        }
 
         const res = await fetch(url);
         if (!res.ok) return;
@@ -924,6 +928,8 @@ async function loadSimpleDashboard() {
             document.getElementById('statFilteredPostponedAppts').textContent = filteredPostponed;
         if (document.getElementById('statFilteredNoShowAppts'))
             document.getElementById('statFilteredNoShowAppts').textContent = filteredNoShow;
+        if (document.getElementById('statRegisteredTodayAppts'))
+            document.getElementById('statRegisteredTodayAppts').textContent = data.stats.registered_today || 0;
 
         // Render Reserved Files
         const reservedContainer = document.getElementById('dashboardReservedFilesList');
@@ -2692,4 +2698,14 @@ async function submitOverdueUpdate(e) {
     } catch (err) {
         showToast('تعذر الاتصال بالخادم المحلي', true);
     }
+}
+
+// ── Dashboard Navigation Helpers ─────────────────────────
+function viewRegisteredTodayAppointments() {
+    // Navigate to appointments tab
+    switchTab('appointments');
+    // Set flag to filter by registered_today
+    window.filterRegisteredToday = true;
+    // Load the appointments
+    loadSimpleAppointments();
 }

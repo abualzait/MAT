@@ -2295,6 +2295,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             'filtered_noshow': conn.execute(sql_noshow, date_args).fetchone()['c'],
             'filtered_attended': conn.execute(sql_attended, date_args).fetchone()['c'],
             'filtered_pending': conn.execute(sql_pending, date_args).fetchone()['c'],
+            'registered_today': conn.execute("SELECT COUNT(*) as c FROM mat_simple_appointments WHERE DATE(created_at) = ?", (today,)).fetchone()['c'],
             'filter_type': filter_type,
         }
 
@@ -2417,6 +2418,12 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             q_like = f"%{q}%"
             query_params.extend([q_like, q_like, q_like, q_like, q_like])
 
+        registered_today = params.get('registered_today')
+        if registered_today == '1':
+            today = datetime.now().strftime('%Y-%m-%d')
+            where_clauses.append("DATE(sa.created_at) = ?")
+            query_params.append(today)
+
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else "WHERE 1=1"
 
         query = f'''
@@ -2450,7 +2457,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                     appt['parent_info'] = prev
 
         conn.close()
-        self.send_json({'mat_appointments': appts})
+        self.send_json({'appointments': appts, 'mat_appointments': appts})
 
     def api_create_simple_appointment(self):
         user = self.require_auth()

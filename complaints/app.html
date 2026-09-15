@@ -145,7 +145,7 @@
                 </div>
 
                 <!-- Stats Row -->
-                <div class="stats-grid stats-grid-3">
+                <div class="stats-grid stats-grid-4" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
                     <!-- Card 1: عدد المواعيد للفترة المحددة -->
                     <div class="stat-card stat-card-primary">
                         <div class="stat-card-header">
@@ -194,6 +194,23 @@
                         </div>
                         <div class="stat-card-footer">
                             <span class="stat-footer-text" id="statPeriodFooterTextNoShow">تخلف المراجعين عن الحضور في الموعد</span>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: المواعيد المسجلة اليوم -->
+                    <div class="stat-card stat-card-success" style="cursor: pointer;" onclick="viewRegisteredTodayAppointments()">
+                        <div class="stat-card-header">
+                            <div class="stat-icon-wrapper icon-green" style="background: rgba(40, 167, 69, 0.1); color: #28a745;">
+                                <span>📝</span>
+                            </div>
+                            <span class="stat-badge badge-green" style="background: rgba(40, 167, 69, 0.1); color: #28a745;">اليوم</span>
+                        </div>
+                        <div class="stat-card-body">
+                            <div class="stat-value-large text-success" id="statRegisteredTodayAppts" style="color: #28a745;">0</div>
+                            <div class="stat-label">مواعيد تم تسجيلها اليوم</div>
+                        </div>
+                        <div class="stat-card-footer">
+                            <span class="stat-footer-text">انقر لعرض المواعيد التي سجلت اليوم</span>
                         </div>
                     </div>
                 </div>

@@ -2665,8 +2665,8 @@ async function submitOverdueUpdate(e) {
     const assignedOfficerVal = document.getElementById('overdueAssignOfficerSelect')?.value;
     const assignedOfficerId = assignedOfficerVal ? parseInt(assignedOfficerVal) : null;
 
-    if (!apptId || !notes) {
-        showToast('يرجى إدخال ملاحظات الإجراء والنتيجة', true);
+    if (!apptId) {
+        showToast('يرجى التأكد من اختيار موعد', true);
         return;
     }
 

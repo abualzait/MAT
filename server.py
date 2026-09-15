@@ -1651,9 +1651,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         data = self.read_json_body()
         subject = data.get('subject', '').strip()
 
-        if not subject:
-            self.send_json({'error': 'موضوع الشكوى مطلوب'}, 400)
-            return
+        # Validation removed
 
         conn = get_db()
 
@@ -1751,9 +1749,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         name = data.get('name', '').strip()
         party_type = data.get('party_type', 'شاكي')
 
-        if not complaint_id or not name:
-            self.send_json({'error': 'بيانات ناقصة'}, 400)
-            return
+        # Validation removed
 
         conn = get_db()
         c = conn.execute('''
@@ -1887,9 +1883,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         appt_date = data.get('appointment_date', '').strip()
         appt_time = data.get('appointment_time', '').strip()
 
-        if not complaint_id or not appt_date or not appt_time:
-            self.send_json({'error': 'بيانات ناقصة (الشكوى، التاريخ، الوقت)'}, 400)
-            return
+        # Validation removed
 
         conn = get_db()
 
@@ -2189,9 +2183,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         password = data.get('password', '')
         role = data.get('role', 'officer')
 
-        if not name or not username or not password:
-            self.send_json({'error': 'جميع الحقول مطلوبة'}, 400)
-            return
+        # Validation removed
 
         if role not in ('admin', 'officer', 'caller'):
             self.send_json({'error': 'دور غير صالح'}, 400)
@@ -2721,9 +2713,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         data = self.read_json_body()
         file_number = data.get('file_number', '').strip()
         notes = data.get('notes', '').strip()
-        if not file_number:
-            self.send_json({'error': 'رقم الملف مطلوب'}, 400)
-            return
+        # Validation removed
             
         conn = get_db()
         try:
@@ -2766,9 +2756,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         to_officer_id = data.get('to_officer_id')
         notes = data.get('notes', '').strip()
         
-        if not res_id or not to_officer_id:
-            self.send_json({'error': 'بيانات النقل غير مكتملة'}, 400)
-            return
+        # Validation removed
 
         conn = get_db()
         try:

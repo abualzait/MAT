@@ -419,7 +419,7 @@
                             <form onsubmit="reserveFile(event)">
                                 <div class="form-group">
                                     <label>رقم الملف / القضية *</label>
-                                    <input type="text" id="newReservationFileNumber" class="form-control" placeholder="أدخل رقم الملف هنا..." required>
+                                    <input type="text" id="newReservationFileNumber" class="form-control" placeholder="أدخل رقم الملف هنا...">
                                 </div>
                                 <div class="form-group">
                                     <label>ملاحظات الاستلام (اختياري)</label>
@@ -626,18 +626,15 @@
                 <form id="formNewOfficer" onsubmit="submitNewOfficer(event)">
                     <div class="form-group">
                         <label>الاسم الكامل *</label>
-                        <input type="text" id="officerName" class="form-control" placeholder="مثال: النقيب أحمد علي"
-                            required>
+                        <input type="text" id="officerName" class="form-control" placeholder="مثال: النقيب أحمد علي">
                     </div>
                     <div class="form-group">
                         <label>اسم المستخدم *</label>
-                        <input type="text" id="officerUsername" class="form-control" placeholder="مثال: officer3"
-                            required>
+                        <input type="text" id="officerUsername" class="form-control" placeholder="مثال: officer3">
                     </div>
                     <div class="form-group">
                         <label>كلمة المرور *</label>
-                        <input type="password" id="officerPassword" class="form-control" placeholder="••••••••"
-                            required>
+                        <input type="password" id="officerPassword" class="form-control" placeholder="••••••••">
                     </div>
                     <div class="form-group">
                         <label>الدور / الصلاحية *</label>
@@ -685,7 +682,7 @@
                     </div>
                     <div class="form-group">
                         <label>نقل إلى الضابط</label>
-                        <select id="transferToOfficer" class="form-control" required>
+                        <select id="transferToOfficer" class="form-control">
                             <option value="">-- اختر الضابط --</option>
                             <!-- Populated dynamically -->
                         </select>
@@ -747,7 +744,7 @@
 
                     <div class="form-group">
                         <label style="font-weight:700; color:#0F172A;">نتيجة الموعد / الحالة الجديدة *</label>
-                        <select id="overdueStatusSelect" class="form-control" style="font-weight:700;" required onchange="toggleOverdueBranchFields()">
+                        <select id="overdueStatusSelect" class="form-control" style="font-weight:700;" onchange="toggleOverdueBranchFields()">
                             <option value="تم الحضور">✅ تم الحضور (حضر المراجع)</option>
                             <option value="لم يحضر">❌ لم يحضر (تخلف عن الموعد)</option>
                             <option value="مُؤجل">🔄 تأجيل وإعادة جدولة (حجز موعد فرعي جديد)</option>
@@ -779,7 +776,7 @@
 
                     <div class="form-group">
                         <label style="font-weight:700; color:#0F172A;">ملاحظات الإجراء والنتيجة التفصيلية *</label>
-                        <textarea id="overdueActionNotes" class="form-control" rows="3" required
+                        <textarea id="overdueActionNotes" class="form-control" rows="3"
                             placeholder="أدخل ملاحظات الإجراء، سبب عدم الحضور، أو تفاصيل كتاب الصادر/المواجهة..."></textarea>
                     </div>
 

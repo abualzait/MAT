@@ -844,7 +844,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.5</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.6</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -912,12 +912,6 @@
             <!-- PANEL 3: LEAFLET INTERACTIVE MAP -->
             <div id="panelMap" class="panel-column panel-map">
                 <div id="mapArea">
-                    <div class="map-status-bar" id="offlineStatusBar">
-                        <div class="status-indicator online-first" id="offlineStatusIndicator">
-                            <span class="status-dot"></span>
-                            <span id="offlineStatusText">وضع الخريطة: أوفلاين/أونلاين</span>
-                        </div>
-                    </div>
                     <div id="map"></div>
                 </div>
             </div>
@@ -35016,7 +35010,7 @@
                 }).setView([placeLat, placeLon], 13);
                 L.tileLayer.offlineFirst('', {
                     maxZoom: 19,
-                    attribution: '© OpenStreetMap (محلي أوفلاين / Local Offline Maps)'
+                    attribution: '© OpenStreetMap'
                 }).addTo(stationMap);
                 
                 stationMap.on('click', async function(e) {
@@ -35430,28 +35424,6 @@
                  setLoading(false);
             }
         }
-        function checkOfflineMapReadiness() {
-            var testImg = new Image();
-            testImg.onload = function() {
-                var dot = document.querySelector('#offlineStatusBar .status-dot');
-                var txt = document.getElementById('offlineStatusText');
-                if(dot && txt) {
-                    dot.style.backgroundColor = '#10B981';
-                    dot.style.boxShadow = '0 0 0 3px rgba(16, 185, 129, 0.2)';
-                    txt.textContent = 'وضع الخريطة: أوفلاين محلي جاهز (100% بدون إنترنت)';
-                }
-            };
-            testImg.onerror = function() {
-                var dot = document.querySelector('#offlineStatusBar .status-dot');
-                var txt = document.getElementById('offlineStatusText');
-                if(dot && txt) {
-                    dot.style.backgroundColor = '#F59E0B';
-                    dot.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.2)';
-                    txt.textContent = 'وضع الخريطة: مباشر أونلاين (لتشغيل الأوفلاين شغل download_amman_tiles.py)';
-                }
-            };
-            testImg.src = 'tiles/offline_tile.svg?' + new Date().getTime();
-        }
 
         function forceMapResize() {
             if (stationMap) {
@@ -35464,7 +35436,6 @@
         // Initialize map on page load for the click-to-pick feature
         window.addEventListener('load', () => {
              initOrUpdateMap(31.95, 35.92, null);
-             checkOfflineMapReadiness();
              
              if ('ResizeObserver' in window) {
                  const ro = new ResizeObserver(() => {

@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Project Name:** MAT (Modular Assistant Toolkit) / Amman Police Stations & Administrative Support System
-- **Current Version:** v1.45.5
+- **Current Version:** v1.45.6
 - **Scope:** Digital assistance toolkit for Amman Governorate / Ministry of Interior (complaints management, appointment scheduling, file custody tracking, live chat, area search, and police station GIS finder).
 
 ## Core Rules & Conventions
@@ -11,7 +11,7 @@
    - Never modify parallel workspace projects unless explicitly directed.
 
 2. **Automatic Project Version Incrementation & Syncing:**
-   - Maintain active project version `v1.45.5` across all documentation (`README.md`), UI version badges (`app.html`, `login.html`, `index.html`), and station finder (`Police_Station_Finder.html`).
+   - Maintain active project version `v1.45.6` across all documentation (`README.md`), UI version badges (`app.html`, `login.html`, `index.html`), and station finder (`Police_Station_Finder.html`).
    - Automatically increment version numbers on every structural or feature modification.
 
 3. **Naming Conventions (`mat` Standard):**

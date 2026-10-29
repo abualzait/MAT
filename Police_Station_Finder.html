@@ -859,6 +859,291 @@
             padding: 3px 8px !important;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
         }
+
+        /* ═══ MAP FULLSCREEN BUTTON & CONTROLS ═══ */
+        .map-fullscreen-btn {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(13, 46, 88, 0.2);
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-family: 'Tajawal', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--primary, #0D2E58);
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .map-fullscreen-btn:hover {
+            background: #0D2E58;
+            color: #ffffff;
+            border-color: #0D2E58;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(13, 46, 88, 0.25);
+        }
+
+        .map-fullscreen-btn.active {
+            background: #DC2626;
+            color: #ffffff;
+            border-color: #B91C1C;
+        }
+        .map-fullscreen-btn.active:hover {
+            background: #B91C1C;
+        }
+
+        /* FULLSCREEN MODE FOR MAP */
+        #mapArea.fullscreen-mode {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 999999 !important;
+            border-radius: 0 !important;
+            border: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+        }
+
+        body.map-is-fullscreen {
+            overflow: hidden !important;
+        }
+
+        /* ═══ FLOATING RESULT CARD BOX ON MAP ═══ */
+        .map-result-card {
+            position: absolute;
+            bottom: 24px;
+            right: 20px;
+            z-index: 1000;
+            width: calc(100% - 40px);
+            max-width: 380px;
+            background: rgba(255, 255, 255, 0.97);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(13, 46, 88, 0.2);
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(13, 46, 88, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
+            font-family: 'Tajawal', sans-serif;
+            overflow: hidden;
+            direction: rtl;
+            text-align: right;
+            animation: slideUpCard 0.25s ease forwards;
+            transition: all 0.25s ease;
+        }
+
+        @keyframes slideUpCard {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .map-card-header {
+            background: linear-gradient(135deg, #0D2E58 0%, #1E3A8A 100%);
+            color: #ffffff;
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .map-card-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #93C5FD;
+        }
+
+        .map-card-badge .badge-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #22C55E;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #22C55E;
+        }
+
+        .map-card-close-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: none;
+            color: #ffffff;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .map-card-close-btn:hover {
+            background: rgba(239, 68, 68, 0.9);
+        }
+
+        .map-card-content {
+            padding: 12px 14px;
+        }
+
+        .map-card-field.primary-field {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-right: 4px solid #0D2E58;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+        }
+
+        .map-card-field .field-icon {
+            font-size: 1.4rem;
+        }
+
+        .map-card-field .field-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .map-card-field .field-label {
+            font-size: 0.72rem;
+            color: #64748B;
+            font-weight: 600;
+        }
+
+        .map-card-field .field-value {
+            font-size: 0.95rem;
+            color: #0F172A;
+            font-weight: 800;
+            line-height: 1.3;
+        }
+
+        .map-card-field .field-value.highlight {
+            color: #0D2E58;
+            font-size: 1.05rem;
+        }
+
+        .map-card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .map-card-grid .map-card-field {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #F1F5F9;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            padding: 6px 8px;
+        }
+
+        .map-card-grid .field-icon {
+            font-size: 1.1rem;
+        }
+
+        .map-card-grid .field-value {
+            font-size: 0.82rem;
+            color: #1E293B;
+            font-weight: 700;
+        }
+
+        .map-card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #E2E8F0;
+            margin-top: 2px;
+        }
+
+        .dist-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #059669;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
+        .card-action-links {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .card-btn-action {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-decoration: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .card-btn-action.btn-nav {
+            background: #0D2E58;
+            color: #ffffff;
+        }
+        .card-btn-action.btn-nav:hover {
+            background: #1E3A8A;
+        }
+
+        .card-btn-action.btn-call {
+            background: #006D39;
+            color: #ffffff;
+        }
+        .card-btn-action.btn-call:hover {
+            background: #047857;
+        }
+
+        /* Floating re-open button if card closed */
+        .map-card-open-pill {
+            position: absolute;
+            bottom: 24px;
+            right: 20px;
+            z-index: 1000;
+            background: #0D2E58;
+            color: #ffffff;
+            border: 1px solid #38BDF8;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-family: 'Tajawal', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .map-card-open-pill:hover {
+            background: #1E3A8A;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -872,7 +1157,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.7</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.8</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -940,6 +1225,18 @@
             <!-- PANEL 3: LEAFLET INTERACTIVE MAP -->
             <div id="panelMap" class="panel-column panel-map">
                 <div id="mapArea">
+                    <!-- Fullscreen Toggle Button -->
+                    <button id="mapFullscreenBtn" class="map-fullscreen-btn" onclick="toggleMapFullscreen()" title="تكبير الخريطة ملء الشاشة">
+                        <span id="fullscreenIcon">⛶</span>
+                        <span id="fullscreenText">ملء الشاشة</span>
+                    </button>
+
+                    <!-- Result Floating Card Box Preview on Map -->
+                    <div id="mapResultCardBox" class="map-result-card" style="display: none;"></div>
+                    <button id="mapResultCardPill" class="map-card-open-pill" style="display: none;" onclick="toggleMapResultCard(true)">
+                        <span>👮</span> <span>عرض بيانات النتيجة</span>
+                    </button>
+
                     <div id="map"></div>
                 </div>
             </div>
@@ -34550,6 +34847,9 @@
 
             const selectedSt = stations[index];
             const place = splitScreenState.matches[splitScreenState.selectedPlaceIndex];
+            if (selectedSt && place) {
+                updateMapResultCard(selectedSt, place.lat, place.lon, place.name);
+            }
 
             // 1. Highlight selected item in List 2
             const stationsContainer = document.getElementById('splitPoliceStationsList');
@@ -34985,6 +35285,175 @@
             liwaLayerGroup.bringToBack();
         }
 
+
+        // ═══ FULLSCREEN & MAP RESULT CARD BOX FUNCTIONS ═══
+        var lastCardBoxData = null;
+
+        function updateMapResultCard(station, placeLat, placeLon, placeDisplayName) {
+            const card = document.getElementById('mapResultCardBox');
+            const pill = document.getElementById('mapResultCardPill');
+            if (!card || !station) return;
+
+            const stationName = station.name || 'مركز شرطة';
+            const adminUnit = station.mutasarrifiya || getLiwaForCoords(station.lat, station.lon) || 'غير محدد';
+            const directorate = station.directorate || 'مديرية الشرطة';
+            const distVal = (typeof station.dist === 'number') ? station.dist.toFixed(2) : (station.actualDist ? station.actualDist.toFixed(2) : '');
+            const phoneClean = station.phone ? station.phone.replace(/[^0-9]/g, '') : '';
+            
+            const originStr = (placeLat && placeLon) ? `${placeLat},${placeLon}` : '';
+            const dirUrl = originStr ? `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${station.lat},${station.lon}` : `https://www.google.com/maps/search/?api=1&query=${station.lat},${station.lon}`;
+
+            lastCardBoxData = { station, placeLat, placeLon, placeDisplayName };
+
+            card.innerHTML = `
+                <div class="map-card-header">
+                    <div class="map-card-badge">
+                        <span class="badge-dot"></span>
+                        <span>بطاقة معلومات النتيجة</span>
+                    </div>
+                    <button class="map-card-close-btn" onclick="toggleMapResultCard(false)" title="تصغير / إغلاق البطاقة">✕</button>
+                </div>
+                <div class="map-card-content">
+                    <!-- 1. المركز الأمني -->
+                    <div class="map-card-field primary-field">
+                        <div class="field-icon">👮</div>
+                        <div class="field-info">
+                            <span class="field-label">المركز الأمني</span>
+                            <strong class="field-value highlight">${stationName}</strong>
+                        </div>
+                    </div>
+
+                    <!-- 2. الوحدة الإدارية & 3. مديرية الشرطة -->
+                    <div class="map-card-grid">
+                        <div class="map-card-field">
+                            <div class="field-icon">🏛️</div>
+                            <div class="field-info">
+                                <span class="field-label">الوحدة الإدارية</span>
+                                <strong class="field-value">${adminUnit}</strong>
+                            </div>
+                        </div>
+                        <div class="map-card-field">
+                            <div class="field-icon">🛡️</div>
+                            <div class="field-info">
+                                <span class="field-label">مديرية الشرطة</span>
+                                <strong class="field-value">${directorate}</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="map-card-footer">
+                        ${distVal ? `<span class="dist-badge">📍 على بعد ${distVal} كم</span>` : '<span></span>'}
+                        <div class="card-action-links">
+                            <a href="${dirUrl}" target="_blank" class="card-btn-action btn-nav">🗺️ اتجاهات</a>
+                            ${phoneClean ? `<a href="tel:${phoneClean}" class="card-btn-action btn-call">📞 ${station.phone || 'اتصال'}</a>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            card.style.display = 'block';
+            if (pill) pill.style.display = 'none';
+
+            // Also attach enriched popup to station marker
+            if (station.marker) {
+                station.marker.bindPopup(`
+                    <div style="font-family:'Tajawal',sans-serif; text-align:right; min-width:210px; padding:4px;">
+                        <div style="font-size:0.75rem; color:#64748B; margin-bottom:2px;">المركز الأمني:</div>
+                        <div style="font-size:1.05rem; font-weight:800; color:#0D2E58; margin-bottom:6px;">👮 ${stationName}</div>
+                        <div style="font-size:0.82rem; margin-bottom:3px; color:#1E293B;">🏛️ <b>الوحدة الإدارية:</b> ${adminUnit}</div>
+                        <div style="font-size:0.82rem; margin-bottom:6px; color:#1E293B;">🛡️ <b>مديرية الشرطة:</b> ${directorate}</div>
+                        ${distVal ? `<div style="font-size:0.8rem; color:#059669; font-weight:700; margin-bottom:8px;">📍 المسافة: ${distVal} كم</div>` : ''}
+                        <a href="${dirUrl}" target="_blank" style="display:block; text-align:center; background:#0D2E58; color:#fff; padding:5px 8px; border-radius:6px; text-decoration:none; font-size:0.8rem; font-weight:700;">🗺️ فتح الاتجاهات</a>
+                    </div>
+                `);
+            }
+        }
+
+        function toggleMapResultCard(show) {
+            const card = document.getElementById('mapResultCardBox');
+            const pill = document.getElementById('mapResultCardPill');
+            if (show) {
+                if (card) card.style.display = 'block';
+                if (pill) pill.style.display = 'none';
+            } else {
+                if (card) card.style.display = 'none';
+                if (pill && lastCardBoxData) pill.style.display = 'flex';
+            }
+        }
+
+        function toggleMapFullscreen() {
+            const mapArea = document.getElementById('mapArea');
+            const btn = document.getElementById('mapFullscreenBtn');
+            if (!mapArea) return;
+
+            const isCurrentlyFullscreen = mapArea.classList.contains('fullscreen-mode') || document.fullscreenElement === mapArea;
+
+            if (!isCurrentlyFullscreen) {
+                // Enter fullscreen
+                mapArea.classList.add('fullscreen-mode');
+                document.body.classList.add('map-is-fullscreen');
+                
+                if (mapArea.requestFullscreen) {
+                    mapArea.requestFullscreen().catch(() => {});
+                } else if (mapArea.webkitRequestFullscreen) {
+                    mapArea.webkitRequestFullscreen();
+                }
+                
+                if (btn) {
+                    btn.innerHTML = '<span>✕</span> <span>تصغير الخريطة</span>';
+                    btn.title = "الخروج من ملء الشاشة (Esc)";
+                    btn.classList.add('active');
+                }
+            } else {
+                // Exit fullscreen
+                mapArea.classList.remove('fullscreen-mode');
+                document.body.classList.remove('map-is-fullscreen');
+                
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+                
+                if (btn) {
+                    btn.innerHTML = '<span>⛶</span> <span>ملء الشاشة</span>';
+                    btn.title = "تكبير الخريطة ملء الشاشة";
+                    btn.classList.remove('active');
+                }
+            }
+
+            forceMapResize();
+        }
+
+        function handleFullscreenChange() {
+            const mapArea = document.getElementById('mapArea');
+            const btn = document.getElementById('mapFullscreenBtn');
+            if (!mapArea) return;
+
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                mapArea.classList.remove('fullscreen-mode');
+                document.body.classList.remove('map-is-fullscreen');
+                if (btn) {
+                    btn.innerHTML = '<span>⛶</span> <span>ملء الشاشة</span>';
+                    btn.title = "تكبير الخريطة ملء الشاشة";
+                    btn.classList.remove('active');
+                }
+            }
+            forceMapResize();
+        }
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const mapArea = document.getElementById('mapArea');
+                if (mapArea && (mapArea.classList.contains('fullscreen-mode') || document.fullscreenElement === mapArea)) {
+                    toggleMapFullscreen();
+                }
+            }
+        });
+
         function initOrUpdateMap(placeLat, placeLon, stations) {
             if (typeof L === 'undefined') {
                 console.error("Leaflet is not loaded.");
@@ -35095,6 +35564,11 @@
             
             // تطبيق تظليل الألوية (إبقاء اللواء الناتج بدون تظليل وتظليل الباقي بألوان مختلفة)
             updateLiwaShading(targetLiwa);
+
+            // معاينة بيانات النتيجة في صندوق البطاقة على الخريطة
+            if (!isInitialLoad && stations && stations.length > 0) {
+                updateMapResultCard(stations[0], placeLat, placeLon, currentSearch ? currentSearch.placeDisplayName : '');
+            }
 
             // نقل العرض وتكبير المكان الذي بالنتيجة
             if (!isInitialLoad && placeLat && placeLon && stationMap) {
@@ -35223,6 +35697,7 @@
             const st = currentSearch.stations[idx];
 
             renderStationHeroCard(st, currentSearch.placeLat, currentSearch.placeLon);
+            updateMapResultCard(st, currentSearch.placeLat, currentSearch.placeLon, currentSearch.placeDisplayName);
 
             if (st.marker && stationMap) {
                 st.marker.openPopup();

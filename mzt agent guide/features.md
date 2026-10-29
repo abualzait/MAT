@@ -1,6 +1,6 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.45.7)
+## Current Features (Version 1.45.8)
 
 1. **Complaints & Cases Management (`/complaints/app`):**
    - Record, view, and process citizen complaints and administrative cases.
@@ -23,6 +23,8 @@
    - **Search Target Isolation:** The Liwa resulting from search is kept completely unshaded (0% fill opacity) with a crisp border highlight, while all other surrounding Liwas are tinted with distinct shading colors.
    - **Camera Pan & Close Zoom:** Smooth `flyTo` animation moving the map camera and zooming in (zoom level 16) directly to the resulting place and nearest station with automatic popup display.
    - **Accurate Station Coordinates:** Verified and corrected coordinates for police stations, including Dahiet Al-Rasheed Police Station (`31.9966, 35.8883` on Al-Wefaq Street).
+   - **Floating Result Card Box on Map:** Direct on-map preview card displaying the three primary administrative fields: **المركز الأمني (Police Station)**, **الوحدة الإدارية (Administrative Unit)**, and **مديرية الشرطة (Police Directorate)**, alongside distance, phone contact, and Google Maps direction navigation.
+   - **Interactive Map Fullscreen Maximize:** Toggle control to expand the map into true full-viewport view (`100vw × 100vh`) with automatic tile resizing and keyboard `Escape` shortcut support.
 
 5. **Internal Meeting Room & FCM Push Notifications:**
    - Real-time team messaging with unread notification badge.

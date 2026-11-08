@@ -1413,6 +1413,16 @@
 
         .map-card-content {
             padding: 12px 14px;
+            max-height: calc(85vh - 75px);
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        .map-card-content::-webkit-scrollbar {
+            width: 5px;
+        }
+        .map-card-content::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 4px;
         }
 
         .map-card-field.primary-field {
@@ -1541,49 +1551,116 @@
             border: none;
         }
         .map-card-branches, .hero-card-branches {
-            margin-top: 8px;
-            padding-top: 6px;
+            margin-top: 10px;
+            padding-top: 8px;
             border-top: 1px dashed rgba(100, 116, 139, 0.25);
         }
-        .branch-chips-scroll {
+        .branch-list-header {
             display: flex;
-            gap: 6px;
-            overflow-x: auto;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: #92400E;
+            margin-bottom: 8px;
             padding-bottom: 4px;
-            -webkit-overflow-scrolling: touch;
+            border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+        }
+        .branch-header-title {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .branch-header-hint {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #B45309;
+            background: #FEF3C7;
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+        .branch-list-vertical {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 250px;
+            overflow-y: auto;
+            padding-left: 3px;
+            padding-right: 3px;
             scrollbar-width: thin;
         }
-        .branch-chips-scroll::-webkit-scrollbar {
-            height: 4px;
+        .branch-list-vertical::-webkit-scrollbar {
+            width: 5px;
         }
-        .branch-chips-scroll::-webkit-scrollbar-track {
+        .branch-list-vertical::-webkit-scrollbar-track {
             background: rgba(0, 0, 0, 0.04);
             border-radius: 4px;
         }
-        .branch-chips-scroll::-webkit-scrollbar-thumb {
+        .branch-list-vertical::-webkit-scrollbar-thumb {
             background: #CBD5E1;
             border-radius: 4px;
         }
-        .branch-chip {
-            white-space: nowrap;
-            background: #FEF3C7;
+        .branch-vertical-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #FFFBEB;
             border: 1px solid #FCD34D;
-            color: #92400E;
-            font-size: 0.73rem;
-            font-weight: 700;
-            padding: 3px 9px;
-            border-radius: 12px;
+            border-radius: 8px;
+            padding: 7px 10px;
             cursor: pointer;
-            font-family: 'Tajawal', sans-serif;
             transition: all 0.18s ease;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            text-decoration: none;
         }
-        .branch-chip:hover {
-            background: #FDE68A !important;
-            border-color: #F59E0B !important;
-            color: #78350F !important;
+        .branch-vertical-item:hover {
+            background: #FEF3C7;
+            border-color: #F59E0B;
             transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
+            box-shadow: 0 2px 6px rgba(245, 158, 11, 0.2);
+        }
+        .branch-item-main {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .branch-item-icon {
+            font-size: 1.15rem;
+            flex-shrink: 0;
+        }
+        .branch-item-text {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            text-align: right;
+        }
+        .branch-item-name {
+            font-size: 0.82rem;
+            font-weight: 800;
+            color: #1E293B;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .branch-item-sub {
+            font-size: 0.72rem;
+            color: #78350F;
+        }
+        .branch-item-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: #D97706;
+            color: #ffffff;
+            padding: 3px 8px;
+            border-radius: 6px;
+            flex-shrink: 0;
+            margin-right: 6px;
+            transition: background 0.15s ease;
+        }
+        .branch-vertical-item:hover .branch-item-badge {
+            background: #B45309;
         }
         .multi-branch-feature {
             background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%) !important;
@@ -1594,7 +1671,6 @@
         .multi-branch-feature:hover {
             background: linear-gradient(135deg, #FDE68A 0%, #FCD34D 100%) !important;
         }
-    
         .map-card-open-pill {
             position: absolute;
             bottom: 24px;
@@ -1632,7 +1708,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.15</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.16</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -3462,6 +3538,17 @@
             }
             closeMapAreaAutocomplete();
 
+            // Also populate matching places Panel 1 with all branches of this establishment vertically
+            const branchMatches = branches.map(b => ({
+                name: b.name,
+                desc: `فرع ${extractBranchLocation(b.name, brandKey)} | معلم في عمان`,
+                type: 'landmark',
+                icon: '🏢',
+                lat: b.lat,
+                lon: b.lon
+            }));
+            renderPlacesPanel(branchMatches);
+
             fetchStationsForCoords(firstBranch.lat, firstBranch.lon, firstBranch.name).then(() => {
                 setTimeout(() => {
                     if (stationMap && (markers.length > 0 || branchMarkers.length > 0)) {
@@ -3655,15 +3742,36 @@
             if (siblingBranches.length > 0) {
                 branchesHtml = `
                     <div class="map-card-branches">
-                        <div style="font-size:0.75rem; font-weight:800; color:#B45309; display:flex; align-items:center; gap:5px; margin-bottom:6px;">
-                            <span>🏢</span>
-                            <span>فروع أخرى متوفرة للمنشأة في عمان (${siblingBranches.length} فروع):</span>
+                        <div class="branch-list-header">
+                            <div class="branch-header-title">
+                                <span>🏢</span>
+                                <span>فروع أخرى للمنشأة (${siblingBranches.length} فروع):</span>
+                            </div>
+                            <span class="branch-header-hint">اختر فرعاً</span>
                         </div>
-                        <div class="branch-chips-scroll">
+                        <div class="branch-list-vertical">
                             ${siblingBranches.map(b => {
                                 const loc = extractBranchLocation(b.name, brandKey);
                                 const safeName = b.name.replace(/'/g, "\\'");
-                                return `<button type="button" class="branch-chip" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">📍 ${loc}</button>`;
+                                let sym = '🏢';
+                                if (b.type === 'roastery' || brandKey.includes('عميد') || brandKey.includes('معروف') || brandKey.includes('شعب')) sym = '☕';
+                                else if (b.type === 'supermarket' || brandKey.includes('سيفوي') || brandKey.includes('كارفور') || brandKey.includes('مول')) sym = '🛒';
+                                else if (b.type === 'bakery' || brandKey.includes('حبيبه') || brandKey.includes('نفيسه') || brandKey.includes('قدس') || brandKey.includes('براديس')) sym = '🥖';
+                                else if (b.type === 'government' || brandKey.includes('ترخيص') || brandKey.includes('احوال') || brandKey.includes('اراضي')) sym = '🏛️';
+                                else if (b.type === 'bank') sym = '🏦';
+
+                                return `
+                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">
+                                        <div class="branch-item-main">
+                                            <span class="branch-item-icon">${sym}</span>
+                                            <div class="branch-item-text">
+                                                <span class="branch-item-name">${b.name}</span>
+                                                <span class="branch-item-sub">📍 الموقع: <b>${loc}</b></span>
+                                            </div>
+                                        </div>
+                                        <span class="branch-item-badge">🎯 اختيار</span>
+                                    </div>
+                                `;
                             }).join('')}
                         </div>
                     </div>
@@ -4366,16 +4474,37 @@
             let branchesHtml = '';
             if (siblingBranches.length > 0) {
                 branchesHtml = `
-                    <div class="hero-card-branches" style="margin-top:8px; padding-top:6px; border-top:1px dashed #CBD5E1;">
-                        <div style="font-size:0.75rem; font-weight:800; color:#B45309; display:flex; align-items:center; gap:4px; margin-bottom:5px;">
-                            <span>🏢</span>
-                            <span>فروع أخرى متوفرة للمنشأة (${siblingBranches.length} فروع):</span>
+                    <div class="hero-card-branches">
+                        <div class="branch-list-header">
+                            <div class="branch-header-title">
+                                <span>🏢</span>
+                                <span>كافة فروع المنشأة بالعاصمة (${siblingBranches.length} فروع):</span>
+                            </div>
+                            <span class="branch-header-hint">اختر فرعاً</span>
                         </div>
-                        <div class="branch-chips-scroll" style="display:flex; gap:5px; overflow-x:auto; padding-bottom:3px; -webkit-overflow-scrolling:touch; scrollbar-width:thin;">
+                        <div class="branch-list-vertical" style="max-height: 280px;">
                             ${siblingBranches.map(b => {
                                 const loc = extractBranchLocation(b.name, brandKey);
                                 const safeName = b.name.replace(/'/g, "\\'");
-                                return `<button type="button" class="branch-chip" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">📍 ${loc}</button>`;
+                                let sym = '🏢';
+                                if (b.type === 'roastery' || brandKey.includes('عميد') || brandKey.includes('معروف') || brandKey.includes('شعب')) sym = '☕';
+                                else if (b.type === 'supermarket' || brandKey.includes('سيفوي') || brandKey.includes('كارفور') || brandKey.includes('مول')) sym = '🛒';
+                                else if (b.type === 'bakery' || brandKey.includes('حبيبه') || brandKey.includes('نفيسه') || brandKey.includes('قدس') || brandKey.includes('براديس')) sym = '🥖';
+                                else if (b.type === 'government' || brandKey.includes('ترخيص') || brandKey.includes('احوال') || brandKey.includes('اراضي')) sym = '🏛️';
+                                else if (b.type === 'bank') sym = '🏦';
+
+                                return `
+                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">
+                                        <div class="branch-item-main">
+                                            <span class="branch-item-icon">${sym}</span>
+                                            <div class="branch-item-text">
+                                                <span class="branch-item-name">${b.name}</span>
+                                                <span class="branch-item-sub">📍 الموقع: <b>${loc}</b></span>
+                                            </div>
+                                        </div>
+                                        <span class="branch-item-badge">🎯 اختيار</span>
+                                    </div>
+                                `;
                             }).join('')}
                         </div>
                     </div>

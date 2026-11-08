@@ -382,14 +382,101 @@
             overflow: hidden !important;
         }
 
-        @media (max-width: 900px) {
+        /* ═══ RESPONSIVE VIEW SWITCHER & TABLET/IFRAME STYLES ═══ */
+        .responsive-view-switcher {
+            display: none;
+            gap: 6px;
+            margin-bottom: 0.5rem;
+            background: #E2E8F0;
+            padding: 4px;
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+        }
+
+        .view-switch-btn {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        .view-switch-btn:hover {
+            color: var(--primary);
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        .view-switch-btn.active {
+            background: #FFFFFF;
+            color: var(--primary);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+
+        @media (max-width: 992px) {
+            .responsive-view-switcher {
+                display: flex !important;
+            }
             .content-area.three-parts-view {
-                grid-template-columns: 1fr;
-                height: auto;
+                display: flex !important;
+                flex-direction: column;
+                height: calc(100vh - 125px);
+                overflow: hidden;
+            }
+            html.is-embedded .content-area.three-parts-view {
+                height: calc(100vh - 85px) !important;
+            }
+            /* Default: show map tab, hide others unless active */
+            .content-area.three-parts-view.view-map #panelPlaces,
+            .content-area.three-parts-view.view-map #panelStation {
+                display: none !important;
+            }
+            .content-area.three-parts-view.view-map #panelMap {
+                display: flex !important;
+                flex: 1;
+                height: 100% !important;
+                min-height: 380px;
+            }
+
+            .content-area.three-parts-view.view-station #panelPlaces,
+            .content-area.three-parts-view.view-station #panelMap {
+                display: none !important;
+            }
+            .content-area.three-parts-view.view-station #panelStation {
+                display: flex !important;
+                flex: 1;
+                height: 100% !important;
                 overflow-y: auto;
             }
-            .panel-column {
+
+            .content-area.three-parts-view.view-places #panelStation,
+            .content-area.three-parts-view.view-places #panelMap {
+                display: none !important;
+            }
+            .content-area.three-parts-view.view-places #panelPlaces {
+                display: flex !important;
+                flex: 1;
+                height: 100% !important;
+                overflow-y: auto;
+            }
+
+            .content-area.three-parts-view.view-all {
+                overflow-y: auto !important;
+                height: auto !important;
+            }
+            .content-area.three-parts-view.view-all .panel-column {
+                display: flex !important;
                 min-height: 280px;
+                margin-bottom: 0.5rem;
+            }
+            .content-area.three-parts-view.view-all #panelMap {
+                min-height: 440px;
             }
         }
 
@@ -901,6 +988,274 @@
             background: #B91C1C;
         }
 
+        /* ═══ FULLSCREEN RETURN TO LOGIN BUTTON ═══ */
+        .map-fullscreen-back-btn {
+            display: none;
+            position: absolute;
+            top: 14px;
+            right: 170px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(13, 46, 88, 0.2);
+            border-radius: 8px;
+            padding: 7px 14px;
+            font-family: 'Tajawal', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--primary, #0D2E58);
+            text-decoration: none;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        #mapArea.fullscreen-mode .map-fullscreen-back-btn {
+            display: flex;
+        }
+
+        .map-fullscreen-back-btn:hover {
+            background: #0D2E58;
+            color: #ffffff;
+            border-color: #0D2E58;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(13, 46, 88, 0.25);
+        }
+
+        /* ═══ FULLSCREEN MAP AREA SEARCH BOX ═══ */
+        .map-area-search-box {
+            display: none;
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 360px);
+            max-width: 540px;
+            z-index: 1002;
+            direction: rtl;
+            text-align: right;
+            font-family: 'Tajawal', sans-serif;
+            transition: all 0.25s ease;
+        }
+
+        #mapArea.fullscreen-mode .map-area-search-box {
+            display: block;
+            animation: fadeInDownMapSearch 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes fadeInDownMapSearch {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -12px);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        .map-search-bar-inner {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.97);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1.5px solid rgba(13, 46, 88, 0.25);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(13, 46, 88, 0.2), 0 2px 6px rgba(0, 0, 0, 0.08);
+            padding: 4px 10px;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .map-search-bar-inner:focus-within {
+            border-color: var(--primary, #0D2E58);
+            box-shadow: 0 10px 30px rgba(13, 46, 88, 0.3), 0 0 0 3px rgba(13, 46, 88, 0.15);
+            background: #ffffff;
+        }
+
+        .map-search-icon {
+            font-size: 1.05rem;
+            color: var(--primary, #0D2E58);
+            user-select: none;
+            display: flex;
+            align-items: center;
+        }
+
+        .map-search-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            font-family: 'Tajawal', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #0F172A;
+            padding: 8px 4px;
+            direction: rtl;
+        }
+
+        .map-search-input::placeholder {
+            color: #94A3B8;
+            font-weight: 500;
+        }
+
+        .map-search-btn-clear {
+            background: transparent;
+            border: none;
+            color: #94A3B8;
+            font-size: 0.9rem;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            display: none;
+        }
+
+        .map-search-btn-clear:hover {
+            color: #DC2626;
+            background: #FEE2E2;
+        }
+
+        .map-search-btn-locate {
+            background: #F1F5F9;
+            border: 1px solid #CBD5E1;
+            color: var(--primary, #0D2E58);
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .map-search-btn-locate:hover {
+            background: #0D2E58;
+            color: #FFFFFF;
+            border-color: #0D2E58;
+            transform: scale(1.05);
+        }
+
+        /* Autocomplete Dropdown in Fullscreen */
+        .map-area-autocomplete-list {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            max-height: 380px;
+            overflow-y: auto;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(13, 46, 88, 0.2);
+            border-radius: 12px;
+            box-shadow: 0 12px 36px rgba(13, 46, 88, 0.25);
+            list-style: none;
+            margin: 0;
+            padding: 6px 0;
+            display: none;
+            z-index: 1005;
+        }
+
+        .map-area-autocomplete-list.active {
+            display: block;
+        }
+
+        .map-area-autocomplete-header {
+            padding: 6px 14px;
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: #64748B;
+            background: #F8FAFC;
+            border-bottom: 1px solid #E2E8F0;
+            border-top: 1px solid #E2E8F0;
+            letter-spacing: 0.3px;
+            user-select: none;
+        }
+
+        .map-area-autocomplete-header:first-child {
+            border-top: none;
+        }
+
+        .map-area-autocomplete-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid #F1F5F9;
+            transition: all 0.15s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .map-area-autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .map-area-autocomplete-item:hover,
+        .map-area-autocomplete-item.selected {
+            background: #EFF6FF;
+            border-right: 4px solid var(--primary, #0D2E58);
+            padding-right: 10px;
+        }
+
+        .map-area-autocomplete-item .item-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .map-area-autocomplete-item .item-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #0F172A;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .map-area-autocomplete-item .item-badge {
+            font-size: 0.7rem;
+            padding: 2px 7px;
+            border-radius: 9999px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .map-area-autocomplete-item .item-desc {
+            font-size: 0.78rem;
+            color: #64748B;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            line-height: 1.3;
+        }
+
+        .map-area-autocomplete-item .item-station {
+            color: #0D2E58;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .map-fullscreen-back-btn {
+                right: auto;
+                left: 14px;
+                padding: 7px 10px;
+            }
+            #mapArea.fullscreen-mode .map-area-search-box {
+                top: 56px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+                max-width: none;
+                transform: none;
+            }
+        }
+
         /* FULLSCREEN MODE FOR MAP */
         #mapArea.fullscreen-mode {
             position: fixed !important;
@@ -1157,7 +1512,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.8</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.10</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -1189,7 +1544,23 @@
 
         <div id="errorMsg" class="error"></div>
 
-        <div id="contentArea" class="content-area three-parts-view">
+        <!-- Responsive View Switcher for Split/Mobile/Iframe Views -->
+        <div id="responsiveViewSwitcher" class="responsive-view-switcher">
+            <button type="button" class="view-switch-btn active" id="btnViewMap" onclick="switchResponsiveView('map')" title="عرض الخريطة والبطاقة التفاعلية">
+                🗺️ الخريطة والبطاقة
+            </button>
+            <button type="button" class="view-switch-btn" id="btnViewStation" onclick="switchResponsiveView('station')" title="عرض تفاصيل المركز الأمني">
+                👮 تفاصيل المركز
+            </button>
+            <button type="button" class="view-switch-btn" id="btnViewPlaces" onclick="switchResponsiveView('places')" title="عرض الأماكن المطابقة">
+                📍 الأماكن المطابقة
+            </button>
+            <button type="button" class="view-switch-btn" id="btnViewAll" onclick="switchResponsiveView('all')" title="عرض جميع الأقسام">
+                📑 عرض متتابع
+            </button>
+        </div>
+
+        <div id="contentArea" class="content-area three-parts-view view-map">
             <!-- PANEL 1: MATCHING PLACES & LANDMARKS -->
             <div id="panelPlaces" class="panel-column panel-places">
                 <div class="panel-header">
@@ -1230,6 +1601,28 @@
                         <span id="fullscreenIcon">⛶</span>
                         <span id="fullscreenText">ملء الشاشة</span>
                     </button>
+
+                    <!-- Fullscreen Back to Login Link -->
+                    <a href="/login" id="mapFullscreenBackBtn" class="map-fullscreen-back-btn" title="العودة لصفحة تسجيل الدخول">
+                        <span>🚪</span>
+                        <span>تسجيل الدخول</span>
+                    </a>
+
+                    <!-- Fullscreen Floating Area Search Box -->
+                    <div id="mapAreaSearchBox" class="map-area-search-box">
+                        <div class="map-search-bar-inner">
+                            <span class="map-search-icon">🔍</span>
+                            <input type="text" id="mapAreaSearchInput" class="map-search-input"
+                                   placeholder="ابحث عن منطقة، حي، دوار، أو مركز أمني في عمان..."
+                                   autocomplete="off"
+                                   oninput="handleMapAreaSearchInput(event)"
+                                   onkeydown="handleMapAreaSearchKeyDown(event)"
+                                   onfocus="handleMapAreaSearchFocus(event)">
+                            <button type="button" id="mapAreaSearchClearBtn" class="map-search-btn-clear" onclick="clearMapAreaSearch()" title="مسح">✕</button>
+                            <button type="button" id="mapAreaSearchLocateBtn" class="map-search-btn-locate" onclick="useMyLocation()" title="تحديد موقعي الحالي">📍</button>
+                        </div>
+                        <ul id="mapAreaAutocompleteResults" class="map-area-autocomplete-list"></ul>
+                    </div>
 
                     <!-- Result Floating Card Box Preview on Map -->
                     <div id="mapResultCardBox" class="map-result-card" style="display: none;"></div>
@@ -35381,6 +35774,269 @@
             }
         }
 
+        // ═══ FULLSCREEN MAP AREA SEARCH LOGIC ═══
+        var mapAreaSearchTimer = null;
+        var mapAreaCurrentFocus = -1;
+
+        function toggleMapAreaClearBtn(show) {
+            const btn = document.getElementById('mapAreaSearchClearBtn');
+            if (btn) btn.style.display = show ? 'block' : 'none';
+        }
+
+        function clearMapAreaSearch() {
+            const input = document.getElementById('mapAreaSearchInput');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            toggleMapAreaClearBtn(false);
+            closeMapAreaAutocomplete();
+        }
+
+        function closeMapAreaAutocomplete() {
+            const list = document.getElementById('mapAreaAutocompleteResults');
+            if (list) {
+                list.classList.remove('active');
+                list.innerHTML = '';
+            }
+            mapAreaCurrentFocus = -1;
+        }
+
+        function handleMapAreaSearchFocus(e) {
+            const val = (e.target.value || '').trim();
+            if (val.length >= 1) {
+                renderMapAreaSearchResults(val);
+            }
+        }
+
+        function handleMapAreaSearchInput(e) {
+            clearTimeout(mapAreaSearchTimer);
+            const val = (e.target.value || '').trim();
+            toggleMapAreaClearBtn(val.length > 0);
+
+            if (val.length === 0) {
+                closeMapAreaAutocomplete();
+                return;
+            }
+
+            mapAreaSearchTimer = setTimeout(() => {
+                renderMapAreaSearchResults(val);
+            }, 120);
+        }
+
+        function handleMapAreaSearchKeyDown(e) {
+            const list = document.getElementById('mapAreaAutocompleteResults');
+            const items = list ? list.querySelectorAll('.map-area-autocomplete-item') : [];
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (items.length === 0) return;
+                mapAreaCurrentFocus++;
+                if (mapAreaCurrentFocus >= items.length) mapAreaCurrentFocus = 0;
+                updateMapAreaActiveItem(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (items.length === 0) return;
+                mapAreaCurrentFocus--;
+                if (mapAreaCurrentFocus < 0) mapAreaCurrentFocus = items.length - 1;
+                updateMapAreaActiveItem(items);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (mapAreaCurrentFocus > -1 && items[mapAreaCurrentFocus]) {
+                    items[mapAreaCurrentFocus].click();
+                } else if (items.length > 0) {
+                    items[0].click();
+                } else {
+                    const query = (document.getElementById('mapAreaSearchInput')?.value || '').trim();
+                    if (query) {
+                        closeMapAreaAutocomplete();
+                        executeDirectMapSearch(query);
+                    }
+                }
+            } else if (e.key === 'Escape') {
+                if (list && list.classList.contains('active')) {
+                    e.stopPropagation();
+                    closeMapAreaAutocomplete();
+                }
+            }
+        }
+
+        function updateMapAreaActiveItem(items) {
+            items.forEach((it, idx) => {
+                if (idx === mapAreaCurrentFocus) {
+                    it.classList.add('selected');
+                    it.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    it.classList.remove('selected');
+                }
+            });
+        }
+
+        function renderMapAreaSearchResults(query) {
+            const list = document.getElementById('mapAreaAutocompleteResults');
+            if (!list) return;
+            list.innerHTML = '';
+            mapAreaCurrentFocus = -1;
+
+            const areaMatches = (ammanAreas || []).filter(a => isFuzzyMatch(a.name, query) || (a.closest && isFuzzyMatch(a.closest, query))).slice(0, 10);
+            const stationMatches = (typeof curatedStations !== 'undefined' ? curatedStations : []).filter(s => isFuzzyMatch(s.name, query) || (s.nameEn && isFuzzyMatch(s.nameEn, query))).slice(0, 5);
+            const landmarkMatches = (typeof localLandmarks !== 'undefined' ? localLandmarks : []).filter(l => isFuzzyMatch(l.name, query) || (l.nameEn && isFuzzyMatch(l.nameEn, query))).slice(0, 5);
+
+            let hasResults = false;
+
+            if (stationMatches.length > 0) {
+                hasResults = true;
+                const header = document.createElement('li');
+                header.className = 'map-area-autocomplete-header';
+                header.innerHTML = '👮 المراكز الأمنية المطابقة';
+                list.appendChild(header);
+
+                stationMatches.forEach(st => {
+                    const li = document.createElement('li');
+                    li.className = 'map-area-autocomplete-item';
+                    li.innerHTML = `
+                        <div class="item-title-row">
+                            <span class="item-title">👮 ${st.name}</span>
+                            <span class="item-badge" style="background: #E0E7FF; color: #3730A3;">مركز أمني</span>
+                        </div>
+                        <div class="item-desc">
+                            <span>${st.directorate || ''} | ${st.mutasarrifiya || ''}</span>
+                            ${st.phone ? `<span>• هاتف: ${st.phone}</span>` : ''}
+                        </div>
+                    `;
+                    li.onclick = () => {
+                        selectMapAreaSearchItem(st.lat, st.lon, st.name);
+                    };
+                    list.appendChild(li);
+                });
+            }
+
+            if (areaMatches.length > 0) {
+                hasResults = true;
+                const header = document.createElement('li');
+                header.className = 'map-area-autocomplete-header';
+                header.innerHTML = '🏘️ الأحياء والمناطق السكنية (محافظة العاصمة)';
+                list.appendChild(header);
+
+                areaMatches.forEach(ar => {
+                    const isCircle = ar.name.includes('دوار') || ar.name.includes('الدوار') || ar.name.includes('ميدان');
+                    const icon = isCircle ? '🔄' : '🏘️';
+                    const badgeText = isCircle ? 'دوار / ميدان' : 'حي سكني';
+                    const badgeBg = isCircle ? '#E0F2FE' : '#DCFCE7';
+                    const badgeColor = isCircle ? '#0369A1' : '#15803D';
+
+                    const li = document.createElement('li');
+                    li.className = 'map-area-autocomplete-item';
+                    li.innerHTML = `
+                        <div class="item-title-row">
+                            <span class="item-title">${icon} ${ar.name}</span>
+                            <span class="item-badge" style="background: ${badgeBg}; color: ${badgeColor};">${badgeText}</span>
+                        </div>
+                        <div class="item-desc">
+                            <span>${ar.liwa || ''} | ${ar.directorate || ''}</span>
+                            ${ar.closest ? `<span class="item-station">• أقرب مركز: <b>${ar.closest}</b></span>` : ''}
+                        </div>
+                    `;
+                    li.onclick = () => {
+                        selectMapAreaSearchItem(ar.lat, ar.lon, ar.name);
+                    };
+                    list.appendChild(li);
+                });
+            }
+
+            if (landmarkMatches.length > 0) {
+                hasResults = true;
+                const header = document.createElement('li');
+                header.className = 'map-area-autocomplete-header';
+                header.innerHTML = '🏢 المعالم والمنشآت الحيوية';
+                list.appendChild(header);
+
+                landmarkMatches.forEach(lm => {
+                    let icon = '📍';
+                    let badgeText = 'معلم';
+                    if (lm.type === 'hotel') { icon = '🏨'; badgeText = 'فندق'; }
+                    else if (lm.type === 'restaurant') { icon = '🍴'; badgeText = 'مطعم / مقهى'; }
+                    else if (lm.type === 'mall') { icon = '🛍️'; badgeText = 'مول تجاري'; }
+                    else if (lm.type === 'government') { icon = '🏛️'; badgeText = 'منشأة حكومية'; }
+
+                    const li = document.createElement('li');
+                    li.className = 'map-area-autocomplete-item';
+                    li.innerHTML = `
+                        <div class="item-title-row">
+                            <span class="item-title">${icon} ${lm.name}</span>
+                            <span class="item-badge" style="background: #F1F5F9; color: #475569;">${badgeText}</span>
+                        </div>
+                        <div class="item-desc">معلم محلي في عمان</div>
+                    `;
+                    li.onclick = () => {
+                        selectMapAreaSearchItem(lm.lat, lm.lon, lm.name);
+                    };
+                    list.appendChild(li);
+                });
+            }
+
+            if (hasResults) {
+                list.classList.add('active');
+            } else {
+                list.classList.remove('active');
+            }
+        }
+
+        function selectMapAreaSearchItem(lat, lon, displayName) {
+            const mapInput = document.getElementById('mapAreaSearchInput');
+            if (mapInput) {
+                mapInput.value = displayName;
+                toggleMapAreaClearBtn(true);
+            }
+            const placeInput = document.getElementById('placeInput');
+            if (placeInput) {
+                placeInput.value = displayName;
+            }
+            closeMapAreaAutocomplete();
+
+            fetchStationsForCoords(lat, lon, displayName);
+        }
+
+        async function executeDirectMapSearch(query) {
+            setLoading(true);
+            try {
+                const matches = await gatherSearchMatches(query);
+                if (matches && matches.length > 0) {
+                    selectMapAreaSearchItem(matches[0].lat, matches[0].lon, matches[0].name);
+                } else {
+                    const geocodeData = await flexibleGeocode(query);
+                    if (geocodeData) {
+                        selectMapAreaSearchItem(geocodeData.lat, geocodeData.lon, query);
+                    } else {
+                        showError("لم نتمكن من تحديد موقع المنطقة المطلوبة بدقة.");
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                showError("حدث خطأ أثناء البحث عن المنطقة.");
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            const searchBox = document.getElementById('mapAreaSearchBox');
+            if (searchBox && !searchBox.contains(e.target)) {
+                closeMapAreaAutocomplete();
+            }
+        });
+
+        function checkUrlFullscreen() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('fullscreen') === '1' || params.get('fullscreen') === 'true' || window.location.hash === '#fullscreen') {
+                const mapArea = document.getElementById('mapArea');
+                if (mapArea && !mapArea.classList.contains('fullscreen-mode')) {
+                    toggleMapFullscreen();
+                }
+            }
+        }
+
         function toggleMapFullscreen() {
             const mapArea = document.getElementById('mapArea');
             const btn = document.getElementById('mapFullscreenBtn');
@@ -35404,6 +36060,14 @@
                     btn.title = "الخروج من ملء الشاشة (Esc)";
                     btn.classList.add('active');
                 }
+
+                // Sync current value from placeInput if mapAreaSearchInput is empty
+                const placeInput = document.getElementById('placeInput');
+                const mapInput = document.getElementById('mapAreaSearchInput');
+                if (placeInput && mapInput && placeInput.value && !mapInput.value) {
+                    mapInput.value = placeInput.value;
+                    toggleMapAreaClearBtn(true);
+                }
             } else {
                 // Exit fullscreen
                 mapArea.classList.remove('fullscreen-mode');
@@ -35420,6 +36084,14 @@
                     btn.title = "تكبير الخريطة ملء الشاشة";
                     btn.classList.remove('active');
                 }
+
+                // Sync back to main input
+                const placeInput = document.getElementById('placeInput');
+                const mapInput = document.getElementById('mapAreaSearchInput');
+                if (placeInput && mapInput && mapInput.value) {
+                    placeInput.value = mapInput.value;
+                }
+                closeMapAreaAutocomplete();
             }
 
             forceMapResize();
@@ -35438,6 +36110,7 @@
                     btn.title = "تكبير الخريطة ملء الشاشة";
                     btn.classList.remove('active');
                 }
+                closeMapAreaAutocomplete();
             }
             forceMapResize();
         }
@@ -35498,6 +36171,11 @@
                                     .filter(p => !p.startsWith("قضاء") && p !== "الأردن" && !/^\d{5}$/.test(p));
                                 const shortName = cleanParts.slice(0, 2).join(', ');
                                 document.getElementById('placeInput').value = shortName;
+                                const mapSearchInput = document.getElementById('mapAreaSearchInput');
+                                if (mapSearchInput) {
+                                    mapSearchInput.value = shortName;
+                                    toggleMapAreaClearBtn(true);
+                                }
                                 await fetchStationsForCoords(lat, lon, shortName);
                                 return;
                             }
@@ -35505,6 +36183,11 @@
                     } catch(e) {}
                     
                     document.getElementById('placeInput').value = "الموقع المحدد على الخريطة";
+                    const mapSearchInput = document.getElementById('mapAreaSearchInput');
+                    if (mapSearchInput) {
+                        mapSearchInput.value = "الموقع المحدد على الخريطة";
+                        toggleMapAreaClearBtn(true);
+                    }
                     await fetchStationsForCoords(lat, lon, "الموقع المحدد على الخريطة");
                 });
             } else {
@@ -35651,6 +36334,11 @@
 
             // Fetch police stations for this coordinate & populate Panel 2 + Panel 3
             await fetchStationsForCoords(match.lat, match.lon, match.name);
+
+            // If narrow screen or iframe, automatically activate map view to reveal shading and card box
+            if (isNarrowScreenOrIframe()) {
+                switchResponsiveView('map');
+            }
         }
 
         function renderStationHeroCard(station, originLat, originLon) {
@@ -35680,12 +36368,15 @@
                         <span style="font-size: 0.8rem;">${station.mutasarrifiya || 'قصبة عمان'}</span>
                     </div>
                 </div>
-                <div class="station-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <a href="${dirUrl}" target="_blank" class="action-btn btn-directions" style="padding: 6px 10px; font-size: 0.8rem; border-radius: var(--radius-md);">
-                        🗺️ اتجاهات
+                <div class="station-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                    <button type="button" onclick="switchResponsiveView('map'); forceMapResize();" class="action-btn" style="background:#0D2E58; color:#ffffff; padding: 6px 8px; font-size: 0.78rem; border-radius: var(--radius-md); border:none; cursor:pointer;">
+                        🗺️ الخريطة
+                    </button>
+                    <a href="${dirUrl}" target="_blank" class="action-btn btn-directions" style="padding: 6px 8px; font-size: 0.78rem; border-radius: var(--radius-md);">
+                        📍 اتجاهات
                     </a>
-                    <a href="tel:${phoneClean}" class="action-btn btn-call" style="padding: 6px 10px; font-size: 0.8rem; border-radius: var(--radius-md);">
-                        📞 اتصل (${station.phone || '06-4643111'})
+                    <a href="tel:${phoneClean}" class="action-btn btn-call" style="padding: 6px 8px; font-size: 0.78rem; border-radius: var(--radius-md);">
+                        📞 اتصال
                     </a>
                 </div>
             `;
@@ -35913,6 +36604,36 @@
             }
         }
 
+
+        let activeResponsiveView = 'map';
+
+        function isNarrowScreenOrIframe() {
+            const contentArea = document.getElementById('contentArea');
+            if (contentArea && contentArea.clientWidth > 0 && contentArea.clientWidth <= 960) {
+                return true;
+            }
+            return window.innerWidth <= 992;
+        }
+
+        function switchResponsiveView(mode) {
+            activeResponsiveView = mode;
+            const contentArea = document.getElementById('contentArea');
+            if (!contentArea) return;
+
+            contentArea.classList.remove('view-map', 'view-station', 'view-places', 'view-all');
+            contentArea.classList.add('view-' + mode);
+
+            document.querySelectorAll('.view-switch-btn').forEach(b => b.classList.remove('active'));
+            if (mode === 'map') document.getElementById('btnViewMap')?.classList.add('active');
+            else if (mode === 'station') document.getElementById('btnViewStation')?.classList.add('active');
+            else if (mode === 'places') document.getElementById('btnViewPlaces')?.classList.add('active');
+            else if (mode === 'all') document.getElementById('btnViewAll')?.classList.add('active');
+
+            if (mode === 'map' || mode === 'all') {
+                forceMapResize();
+            }
+        }
+
         function forceMapResize() {
             if (stationMap) {
                 setTimeout(() => { try { stationMap.invalidateSize(); } catch(e){} }, 50);
@@ -35932,6 +36653,10 @@
                  const mapArea = document.getElementById('mapArea');
                  if (mapArea) ro.observe(mapArea);
              }
+
+             // Check if fullscreen view was requested via URL query param (?fullscreen=1)
+             checkUrlFullscreen();
+             setTimeout(checkUrlFullscreen, 200);
         });
     </script>
 </body>

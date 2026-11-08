@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.8)  ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.45.10) ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -962,7 +962,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         # Police Station Finder route
-        if path == '/police-stations' or path == '/finder':
+        if path in ('/police-stations', '/finder', '/Police_Station_Finder.html'):
             self.serve_file('Police_Station_Finder.html')
             return
 
@@ -1054,7 +1054,9 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 mime_type = 'application/octet-stream'
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
-            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             with open(full_path, 'rb') as f:
                 self.wfile.write(f.read())

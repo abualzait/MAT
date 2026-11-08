@@ -1301,9 +1301,28 @@
         }
 
         /* FULLSCREEN MODE FOR MAP */
+        body.map-is-fullscreen {
+            overflow: hidden !important;
+        }
+
+        body.map-is-fullscreen .container,
+        body.map-is-fullscreen .content-area,
+        body.map-is-fullscreen .panel-column,
+        body.map-is-fullscreen .panel-map {
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            transform: none !important;
+            filter: none !important;
+            perspective: none !important;
+            contain: none !important;
+        }
+
         #mapArea.fullscreen-mode {
             position: fixed !important;
-            inset: 0 !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
             width: 100vw !important;
             height: 100vh !important;
             z-index: 999999 !important;
@@ -1312,10 +1331,6 @@
             margin: 0 !important;
             padding: 0 !important;
             box-shadow: none !important;
-        }
-
-        body.map-is-fullscreen {
-            overflow: hidden !important;
         }
 
         /* ═══ FLOATING RESULT CARD BOX ON MAP ═══ */
@@ -1556,7 +1571,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.11</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.12</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -1643,6 +1658,20 @@
             <!-- PANEL 3: LEAFLET INTERACTIVE MAP -->
             <div id="panelMap" class="panel-column panel-map">
                 <div id="mapArea">
+                    <script>
+                        (function() {
+                            try {
+                                var p = new URLSearchParams(window.location.search);
+                                var isFs = p.get('fullscreen') === '1' || p.get('fullscreen') === 'true' || window.location.hash === '#fullscreen';
+                                var isCol = p.get('columns') === '1' || p.get('classic') === 'true';
+                                if (isFs || (window.self === window.top && !isCol)) {
+                                    var el = document.getElementById('mapArea');
+                                    if (el) el.classList.add('fullscreen-mode');
+                                    document.body.classList.add('map-is-fullscreen');
+                                }
+                            } catch(e) {}
+                        })();
+                    </script>
                     <!-- Fullscreen Toggle Button -->
                     <button id="mapFullscreenBtn" class="map-fullscreen-btn" onclick="toggleMapFullscreen()" title="تكبير الخريطة ملء الشاشة">
                         <span id="fullscreenIcon">⛶</span>
@@ -1650,7 +1679,7 @@
                     </button>
 
                     <!-- Fullscreen Back to Login Link -->
-                    <a href="/login" id="mapFullscreenBackBtn" class="map-fullscreen-back-btn" title="العودة لصفحة تسجيل الدخول">
+                    <a href="/complaints/login" id="mapFullscreenBackBtn" class="map-fullscreen-back-btn" title="العودة لصفحة تسجيل الدخول">
                         <span>🚪</span>
                         <span>تسجيل الدخول</span>
                     </a>
@@ -11351,32 +11380,33 @@
         });
 
         function checkUrlFullscreen() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('fullscreen') === '1' || params.get('fullscreen') === 'true' || window.location.hash === '#fullscreen') {
-                const mapArea = document.getElementById('mapArea');
-                if (mapArea && !mapArea.classList.contains('fullscreen-mode')) {
-                    toggleMapFullscreen();
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const isExplicitFullscreen = params.get('fullscreen') === '1' || params.get('fullscreen') === 'true' || window.location.hash === '#fullscreen';
+                const isExplicitColumns = params.get('columns') === '1' || params.get('classic') === 'true';
+                const isStandalone = (window.self === window.top);
+
+                if (isExplicitFullscreen || (isStandalone && !isExplicitColumns)) {
+                    const mapArea = document.getElementById('mapArea');
+                    if (mapArea && !mapArea.classList.contains('fullscreen-mode')) {
+                        toggleMapFullscreen(true);
+                    }
                 }
-            }
+            } catch(e) {}
         }
 
-        function toggleMapFullscreen() {
+        function toggleMapFullscreen(forceState) {
             const mapArea = document.getElementById('mapArea');
             const btn = document.getElementById('mapFullscreenBtn');
             if (!mapArea) return;
 
-            const isCurrentlyFullscreen = mapArea.classList.contains('fullscreen-mode') || document.fullscreenElement === mapArea;
+            const isCurrentlyFullscreen = mapArea.classList.contains('fullscreen-mode');
+            const shouldBeFullscreen = (typeof forceState === 'boolean') ? forceState : !isCurrentlyFullscreen;
 
-            if (!isCurrentlyFullscreen) {
+            if (shouldBeFullscreen) {
                 // Enter fullscreen
                 mapArea.classList.add('fullscreen-mode');
                 document.body.classList.add('map-is-fullscreen');
-                
-                if (mapArea.requestFullscreen) {
-                    mapArea.requestFullscreen().catch(() => {});
-                } else if (mapArea.webkitRequestFullscreen) {
-                    mapArea.webkitRequestFullscreen();
-                }
                 
                 if (btn) {
                     btn.innerHTML = '<span>✕</span> <span>تصغير الخريطة</span>';
@@ -11396,12 +11426,6 @@
                 mapArea.classList.remove('fullscreen-mode');
                 document.body.classList.remove('map-is-fullscreen');
                 
-                if (document.fullscreenElement) {
-                    document.exitFullscreen().catch(() => {});
-                } else if (document.webkitExitFullscreen) {
-                    document.webkitExitFullscreen();
-                }
-                
                 if (btn) {
                     btn.innerHTML = '<span>⛶</span> <span>ملء الشاشة</span>';
                     btn.title = "تكبير الخريطة ملء الشاشة";
@@ -11420,32 +11444,11 @@
             forceMapResize();
         }
 
-        function handleFullscreenChange() {
-            const mapArea = document.getElementById('mapArea');
-            const btn = document.getElementById('mapFullscreenBtn');
-            if (!mapArea) return;
-
-            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-                mapArea.classList.remove('fullscreen-mode');
-                document.body.classList.remove('map-is-fullscreen');
-                if (btn) {
-                    btn.innerHTML = '<span>⛶</span> <span>ملء الشاشة</span>';
-                    btn.title = "تكبير الخريطة ملء الشاشة";
-                    btn.classList.remove('active');
-                }
-                closeMapAreaAutocomplete();
-            }
-            forceMapResize();
-        }
-
-        document.addEventListener('fullscreenchange', handleFullscreenChange);
-        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 const mapArea = document.getElementById('mapArea');
-                if (mapArea && (mapArea.classList.contains('fullscreen-mode') || document.fullscreenElement === mapArea)) {
-                    toggleMapFullscreen();
+                if (mapArea && mapArea.classList.contains('fullscreen-mode')) {
+                    toggleMapFullscreen(false);
                 }
             }
         });
@@ -11967,13 +11970,24 @@
 
         // Initialize map on page load for the click-to-pick feature
         window.addEventListener('load', () => {
+             // Check and enforce fullscreen mode on load
+             checkUrlFullscreen();
+
+             // Sync button state if already in fullscreen
+             const mapArea = document.getElementById('mapArea');
+             const btn = document.getElementById('mapFullscreenBtn');
+             if (mapArea && mapArea.classList.contains('fullscreen-mode') && btn) {
+                 btn.innerHTML = '<span>✕</span> <span>تصغير الخريطة</span>';
+                 btn.title = "الخروج من ملء الشاشة (Esc)";
+                 btn.classList.add('active');
+             }
+
              initOrUpdateMap(31.95, 35.92, null);
              
              if ('ResizeObserver' in window) {
                  const ro = new ResizeObserver(() => {
                      forceMapResize();
                  });
-                 const mapArea = document.getElementById('mapArea');
                  if (mapArea) ro.observe(mapArea);
              }
         });

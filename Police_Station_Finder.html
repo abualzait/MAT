@@ -1534,6 +1534,67 @@
         }
 
         /* Floating re-open button if card closed */
+        
+        /* Multi-Branch Establishment Styles */
+        .branch-marker-icon {
+            background: transparent;
+            border: none;
+        }
+        .map-card-branches, .hero-card-branches {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px dashed rgba(100, 116, 139, 0.25);
+        }
+        .branch-chips-scroll {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+        .branch-chips-scroll::-webkit-scrollbar {
+            height: 4px;
+        }
+        .branch-chips-scroll::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.04);
+            border-radius: 4px;
+        }
+        .branch-chips-scroll::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 4px;
+        }
+        .branch-chip {
+            white-space: nowrap;
+            background: #FEF3C7;
+            border: 1px solid #FCD34D;
+            color: #92400E;
+            font-size: 0.73rem;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-family: 'Tajawal', sans-serif;
+            transition: all 0.18s ease;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .branch-chip:hover {
+            background: #FDE68A !important;
+            border-color: #F59E0B !important;
+            color: #78350F !important;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
+        }
+        .multi-branch-feature {
+            background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%) !important;
+            border: 1px solid #F59E0B !important;
+            border-radius: 8px !important;
+            margin: 4px 0 !important;
+        }
+        .multi-branch-feature:hover {
+            background: linear-gradient(135deg, #FDE68A 0%, #FCD34D 100%) !important;
+        }
+    
         .map-card-open-pill {
             position: absolute;
             bottom: 24px;
@@ -1571,7 +1632,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.14</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.15</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -2252,13 +2313,47 @@
                 });
             }
 
-            // 3. Group: Local Landmarks
+            // 3. Group: Local Landmarks & Multi-Branch Establishments
             if (landmarkMatches && landmarkMatches.length > 0) {
                 hasResults = true;
                 const header = document.createElement('li');
                 header.className = 'autocomplete-category';
-                header.innerHTML = `🏢 المنشآت والمعالم المحلية (دون اتصال)`;
+                header.innerHTML = `🏢 المعالم والمنشآت والفروع في العاصمة`;
                 resultsContainer.appendChild(header);
+
+                // Multi-branch brand detection
+                const brandGroups = {};
+                landmarkMatches.forEach(lm => {
+                    const bk = extractBrandKey(lm.name);
+                    if (bk) {
+                        if (!brandGroups[bk]) brandGroups[bk] = [];
+                        brandGroups[bk].push(lm);
+                    }
+                });
+
+                const renderedBrands = new Set();
+                Object.keys(brandGroups).forEach(bk => {
+                    const allBrandBranches = (typeof localLandmarks !== 'undefined') ? localLandmarks.filter(l => extractBrandKey(l.name) === bk) : [];
+                    if (allBrandBranches.length >= 2 && !renderedBrands.has(bk)) {
+                        renderedBrands.add(bk);
+                        const topLi = document.createElement('li');
+                        topLi.className = 'autocomplete-item multi-branch-feature';
+                        const firstBranch = allBrandBranches[0];
+                        const cleanBrandDisplay = extractBrandKey(firstBranch.name);
+                        topLi.innerHTML = `
+                            <div class="autocomplete-name">
+                                <span style="color: #92400E; font-weight: 800;">🗺️ استعراض كافة فروع (${cleanBrandDisplay})</span>
+                                <span style="font-size: 0.7rem; background: #D97706; color: #FFFFFF; padding: 2px 6px; border-radius: 4px; font-weight: bold;">🏢 ${allBrandBranches.length} فروع</span>
+                            </div>
+                            <div class="autocomplete-desc" style="color: #78350F;">عرض وتوزيع كافة فروع المنشأة في عمان على الخريطة</div>
+                        `;
+                        topLi.onclick = () => {
+                            resultsContainer.classList.remove('active');
+                            showAllEstablishmentBranchesOnMap(bk, cleanBrandDisplay);
+                        };
+                        resultsContainer.appendChild(topLi);
+                    }
+                });
 
                 landmarkMatches.forEach(lm => {
                     let badge = { text: "معلم", bg: "#EDF2F7", color: "#4A5568", icon: "📍" };
@@ -2284,13 +2379,26 @@
                     else if (lm.type === "attraction") badge = { text: "معلم سياحي / أثري", bg: "#F3E8FF", color: "#7E22CE", icon: "🏛️" };
                     else if (lm.type === "bank") badge = { text: "بنك / مصرف", bg: "#E0F2FE", color: "#0369A1", icon: "🏦" };
 
+                    const bk = extractBrandKey(lm.name);
+                    const branchLoc = bk ? extractBranchLocation(lm.name, bk) : '';
+                    const isMultiBranchItem = bk && ((brandGroups[bk] && brandGroups[bk].length > 1) || ((typeof localLandmarks !== 'undefined') && localLandmarks.filter(l => extractBrandKey(l.name) === bk).length > 1));
+
+                    const badgeStyle = isMultiBranchItem
+                        ? 'font-size: 0.7rem; background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; padding: 2px 6px; border-radius: 4px; font-weight: bold;'
+                        : `font-size: 0.7rem; background: ${badge.bg}; color: ${badge.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;`;
+
+                    const displayedBadgeText = (isMultiBranchItem && branchLoc && branchLoc !== lm.name)
+                        ? `فرع ${branchLoc}`
+                        : badge.text;
+
                     const li = document.createElement('li');
                     li.className = 'autocomplete-item';
                     li.innerHTML = `
                         <div class="autocomplete-name">
                             <span>${badge.icon} ${lm.name}</span>
-                            <span style="font-size: 0.7rem; background: ${badge.bg}; color: ${badge.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${badge.text}</span>
+                            <span style="${badgeStyle}">${displayedBadgeText}</span>
                         </div>
+                        ${isMultiBranchItem ? `<div class="autocomplete-desc">فرع من فروع ${bk} في محافظة العاصمة</div>` : ''}
                     `;
                     li.onclick = () => {
                         document.getElementById('placeInput').value = lm.name;
@@ -2347,11 +2455,21 @@
 
         async function handleInput(e) {
             clearTimeout(debounceTimer);
+            const query = (e.target.value || '').trim();
             const resultsContainer = document.getElementById('autocompleteResults');
-            if (resultsContainer) {
-                resultsContainer.classList.remove('active');
-                resultsContainer.innerHTML = '';
+            if (!query || query.length < 2) {
+                if (resultsContainer) {
+                    resultsContainer.classList.remove('active');
+                    resultsContainer.innerHTML = '';
+                }
+                return;
             }
+            debounceTimer = setTimeout(() => {
+                const areaMatches = (ammanAreas || []).filter(a => isFuzzyMatch(a.name, query) || (a.closest && isFuzzyMatch(a.closest, query))).slice(0, 10);
+                const stationMatches = (typeof curatedStations !== 'undefined' ? curatedStations : []).filter(s => isFuzzyMatch(s.name, query) || (s.nameEn && isFuzzyMatch(s.nameEn, query))).slice(0, 5);
+                const landmarkMatches = (typeof localLandmarks !== 'undefined' ? localLandmarks : []).filter(l => isFuzzyMatch(l.name, query) || (l.nameEn && isFuzzyMatch(l.nameEn, query))).slice(0, 35);
+                renderAutocomplete(stationMatches, areaMatches, [], landmarkMatches);
+            }, 250);
         }
 
         document.addEventListener('click', function(e) {
@@ -2888,6 +3006,7 @@
             // Clear existing markers
             markers.forEach(m => stationMap.removeLayer(m));
             markers = [];
+            clearBranchMarkers();
             currentRouteLine = null;
 
             const placeIcon = createSvgIcon('green');
@@ -3200,6 +3319,160 @@
             });
         }
 
+
+        // ═══ MULTI-BRANCH ESTABLISHMENT ENGINE ═══
+        var branchMarkers = [];
+
+        function clearBranchMarkers() {
+            if (typeof branchMarkers !== 'undefined' && branchMarkers.length > 0 && stationMap) {
+                branchMarkers.forEach(m => {
+                    try { stationMap.removeLayer(m); } catch(e){}
+                });
+            }
+            branchMarkers = [];
+        }
+
+        function extractBrandKey(name) {
+            if (!name) return '';
+            let s = name.replace(/\(.*?\)/g, '').trim();
+            s = s.split(/\s+-\s+/)[0].trim();
+            let norm = normalizeArabic(s);
+            
+            const genericWords = new Set([
+                'مسجد', 'جامع', 'مدرسه', 'شارع', 'حي', 'حديقه', 'دوار', 'ميدان', 'صيدليه', 'مركز', 
+                'مستشفي', 'مستشفى', 'مجمع', 'روضه', 'حضانه', 'مطعم', 'مقهي', 'سوبرماركت', 'بقاله',
+                'مخبز', 'محمصه', 'محل', 'معرض', 'كافيه', 'اسواق', 'سوق', 'محطه'
+            ]);
+            
+            const prefixes = ['محامص', 'محمصه', 'حلويات', 'مخابز', 'مخبز', 'سوبرماركت', 'هايبرماركت', 'اسواق'];
+            for (const p of prefixes) {
+                if (norm.startsWith(p + ' ')) {
+                    const cand = norm.substring(p.length + 1).trim();
+                    if (cand && !genericWords.has(cand) && cand.length > 2) {
+                        norm = cand;
+                        break;
+                    }
+                }
+            }
+            if (norm.startsWith('كارفور')) norm = 'كارفور';
+            else if (norm.startsWith('بن العميد')) norm = 'بن العميد';
+            else if (norm.startsWith('بن معروف')) norm = 'بن معروف';
+            else if (norm.startsWith('سامح مول')) norm = 'سامح مول';
+            else if (norm.startsWith('ياسر مول')) norm = 'ياسر مول';
+            else if (norm.startsWith('كوزمو')) norm = 'كوزمو';
+
+            if (genericWords.has(norm) || norm.length <= 2) return '';
+            return norm;
+        }
+
+        function extractBranchLocation(fullName, brandKey) {
+            if (!fullName) return '';
+            const m = fullName.match(/\((.*?)\)/);
+            if (m && m[1]) return m[1].trim();
+            if (fullName.includes(' - ')) {
+                const parts = fullName.split(' - ');
+                if (parts.length > 1 && parts[parts.length - 1].trim()) {
+                    return parts[parts.length - 1].trim();
+                }
+            }
+            return fullName;
+        }
+
+        function findSiblingBranches(placeName, placeLat, placeLon) {
+            const brandKey = extractBrandKey(placeName);
+            if (!brandKey || typeof localLandmarks === 'undefined') return [];
+            return localLandmarks.filter(lm => {
+                const isSelf = (typeof placeLat === 'number' && typeof placeLon === 'number') &&
+                               Math.abs(lm.lat - placeLat) < 0.0001 && Math.abs(lm.lon - placeLon) < 0.0001;
+                if (isSelf) return false;
+                return extractBrandKey(lm.name) === brandKey;
+            });
+        }
+
+        function createBranchMarkerIcon(iconSymbol) {
+            const sym = iconSymbol || '🏢';
+            const svg = `
+                <div style="position:relative; width:32px; height:40px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.28));">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 30" width="32" height="40">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 18 12 18s12-9 12-18c0-6.63-5.37-12-12-12z" fill="#D97706" stroke="#FFFFFF" stroke-width="2"/>
+                        <circle cx="12" cy="12" r="7.5" fill="#FFFFFF"/>
+                    </svg>
+                    <div style="position:absolute; top:4px; font-size:11px; line-height:1; pointer-events:none;">${sym}</div>
+                </div>
+            `;
+            return L.divIcon({
+                html: svg,
+                className: 'branch-marker-icon',
+                iconSize: [32, 40],
+                iconAnchor: [16, 40],
+                popupAnchor: [0, -36]
+            });
+        }
+
+        function renderEstablishmentBranchMarkers(placeDisplayName, placeLat, placeLon) {
+            clearBranchMarkers();
+            if (!placeDisplayName || typeof stationMap === 'undefined' || !stationMap) return;
+            const branches = findSiblingBranches(placeDisplayName, placeLat, placeLon);
+            if (!branches || branches.length === 0) return;
+
+            const brandKey = extractBrandKey(placeDisplayName);
+            branches.forEach(b => {
+                let symbol = '🏢';
+                if (b.type === 'roastery' || brandKey.includes('عميد') || brandKey.includes('معروف') || brandKey.includes('شعب')) symbol = '☕';
+                else if (b.type === 'supermarket' || brandKey.includes('سيفوي') || brandKey.includes('كارفور') || brandKey.includes('مول')) symbol = '🛒';
+                else if (b.type === 'bakery' || brandKey.includes('حبيبه') || brandKey.includes('نفيسه') || brandKey.includes('قدس') || brandKey.includes('براديس')) symbol = '🥖';
+                else if (b.type === 'government' || brandKey.includes('ترخيص') || brandKey.includes('احوال') || brandKey.includes('اراضي')) symbol = '🏛️';
+                else if (b.type === 'bank') symbol = '🏦';
+
+                const bIcon = createBranchMarkerIcon(symbol);
+                const bMarker = L.marker([b.lat, b.lon], { icon: bIcon, zIndexOffset: 450 }).addTo(stationMap);
+                
+                const branchLoc = extractBranchLocation(b.name, brandKey);
+                const safeName = b.name.replace(/'/g, "\\'");
+                bMarker.bindPopup(`
+                    <div style="font-family:'Tajawal',sans-serif; text-align:right; min-width:210px; padding:6px 4px;">
+                        <div style="display:flex; align-items:center; gap:4px; font-size:0.75rem; color:#D97706; font-weight:800; margin-bottom:4px;">
+                            <span>🏢</span> <span>فرع إضافي لنفس المنشأة</span>
+                        </div>
+                        <div style="font-size:1.0rem; font-weight:800; color:#0D2E58; margin-bottom:4px;">${b.name}</div>
+                        <div style="font-size:0.8rem; color:#475569; margin-bottom:10px;">📍 الموقع: <b>${branchLoc}</b></div>
+                        <button type="button" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" style="display:block; width:100%; text-align:center; background:#0D2E58; color:#fff; padding:6px 10px; border:none; border-radius:6px; font-size:0.82rem; font-weight:700; cursor:pointer; font-family:'Tajawal',sans-serif; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+                            🎯 تحديد أقرب مركز أمني لهذا الفرع
+                        </button>
+                    </div>
+                `);
+                branchMarkers.push(bMarker);
+            });
+        }
+
+        function showAllEstablishmentBranchesOnMap(brandKey, brandDisplayName) {
+            if (typeof localLandmarks === 'undefined') return;
+            const branches = localLandmarks.filter(lm => extractBrandKey(lm.name) === brandKey);
+            if (!branches || branches.length === 0) return;
+
+            const firstBranch = branches[0];
+            const mapInput = document.getElementById('mapAreaSearchInput');
+            if (mapInput) {
+                mapInput.value = brandDisplayName || firstBranch.name;
+                toggleMapAreaClearBtn(true);
+            }
+            const placeInput = document.getElementById('placeInput');
+            if (placeInput) {
+                placeInput.value = brandDisplayName || firstBranch.name;
+            }
+            closeMapAreaAutocomplete();
+
+            fetchStationsForCoords(firstBranch.lat, firstBranch.lon, firstBranch.name).then(() => {
+                setTimeout(() => {
+                    if (stationMap && (markers.length > 0 || branchMarkers.length > 0)) {
+                        const allMarkersGroup = new L.featureGroup([...markers, ...branchMarkers]);
+                        stationMap.fitBounds(allMarkersGroup.getBounds().pad(0.18));
+                    }
+                }, 350);
+            });
+        }
+    
+
         // Custom Offline-First TileLayer with automatic online fallback and offline SVG placeholder
         if (typeof L !== 'undefined' && !L.TileLayer.OfflineFirst) {
             L.TileLayer.OfflineFirst = L.TileLayer.extend({
@@ -3375,6 +3648,28 @@
 
             lastCardBoxData = { station, placeLat, placeLon, placeDisplayName };
 
+            const effectivePlaceName = placeDisplayName || (currentSearch ? currentSearch.placeDisplayName : '');
+            const siblingBranches = findSiblingBranches(effectivePlaceName, placeLat, placeLon);
+            const brandKey = extractBrandKey(effectivePlaceName);
+            let branchesHtml = '';
+            if (siblingBranches.length > 0) {
+                branchesHtml = `
+                    <div class="map-card-branches">
+                        <div style="font-size:0.75rem; font-weight:800; color:#B45309; display:flex; align-items:center; gap:5px; margin-bottom:6px;">
+                            <span>🏢</span>
+                            <span>فروع أخرى متوفرة للمنشأة في عمان (${siblingBranches.length} فروع):</span>
+                        </div>
+                        <div class="branch-chips-scroll">
+                            ${siblingBranches.map(b => {
+                                const loc = extractBranchLocation(b.name, brandKey);
+                                const safeName = b.name.replace(/'/g, "\\'");
+                                return `<button type="button" class="branch-chip" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">📍 ${loc}</button>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
             card.innerHTML = `
                 <div class="map-card-header">
                     <div class="map-card-badge">
@@ -3410,6 +3705,8 @@
                             </div>
                         </div>
                     </div>
+
+                    ${branchesHtml}
 
                     <div class="map-card-footer">
                         ${distVal ? `<span class="dist-badge">📍 على بعد ${distVal} كم</span>` : '<span></span>'}
@@ -3557,7 +3854,7 @@
 
             const areaMatches = (ammanAreas || []).filter(a => isFuzzyMatch(a.name, query) || (a.closest && isFuzzyMatch(a.closest, query))).slice(0, 10);
             const stationMatches = (typeof curatedStations !== 'undefined' ? curatedStations : []).filter(s => isFuzzyMatch(s.name, query) || (s.nameEn && isFuzzyMatch(s.nameEn, query))).slice(0, 5);
-            const landmarkMatches = (typeof localLandmarks !== 'undefined' ? localLandmarks : []).filter(l => isFuzzyMatch(l.name, query) || (l.nameEn && isFuzzyMatch(l.nameEn, query))).slice(0, 5);
+            const landmarkMatches = (typeof localLandmarks !== 'undefined' ? localLandmarks : []).filter(l => isFuzzyMatch(l.name, query) || (l.nameEn && isFuzzyMatch(l.nameEn, query))).slice(0, 40);
 
             let hasResults = false;
 
@@ -3625,8 +3922,42 @@
                 hasResults = true;
                 const header = document.createElement('li');
                 header.className = 'map-area-autocomplete-header';
-                header.innerHTML = '🏢 المعالم والمنشآت الحيوية';
+                header.innerHTML = '🏢 المعالم والمنشآت والفروع';
                 list.appendChild(header);
+
+                // Group matches by brand to detect multi-branch establishments
+                const brandGroups = {};
+                landmarkMatches.forEach(lm => {
+                    const bk = extractBrandKey(lm.name);
+                    if (bk) {
+                        if (!brandGroups[bk]) brandGroups[bk] = [];
+                        brandGroups[bk].push(lm);
+                    }
+                });
+
+                // Top featured action for multi-branch brands
+                const renderedBrandFeature = new Set();
+                Object.keys(brandGroups).forEach(bk => {
+                    const allBrandBranches = (typeof localLandmarks !== 'undefined') ? localLandmarks.filter(l => extractBrandKey(l.name) === bk) : [];
+                    if (allBrandBranches.length >= 2 && !renderedBrandFeature.has(bk)) {
+                        renderedBrandFeature.add(bk);
+                        const topLi = document.createElement('li');
+                        topLi.className = 'map-area-autocomplete-item multi-branch-feature';
+                        const firstBranch = allBrandBranches[0];
+                        const cleanBrandDisplay = extractBrandKey(firstBranch.name);
+                        topLi.innerHTML = `
+                            <div class="item-title-row">
+                                <span class="item-title" style="color: #92400E; font-weight: 800;">🗺️ استعراض كافة فروع (${cleanBrandDisplay})</span>
+                                <span class="item-badge" style="background: #D97706; color: #FFFFFF; font-weight: 800;">🏢 ${allBrandBranches.length} فروع بالعاصمة</span>
+                            </div>
+                            <div class="item-desc" style="color: #78350F; font-size: 0.76rem;">اضغط لإظهار وتوزيع كافة فروع المنشأة معاً على الخريطة</div>
+                        `;
+                        topLi.onclick = () => {
+                            showAllEstablishmentBranchesOnMap(bk, cleanBrandDisplay);
+                        };
+                        list.appendChild(topLi);
+                    }
+                });
 
                 landmarkMatches.forEach(lm => {
                     let icon = '📍';
@@ -3650,14 +3981,26 @@
                     else if (lm.type === 'attraction') { icon = '🏛️'; badgeText = 'معلم سياحي'; }
                     else if (lm.type === 'bank') { icon = '🏦'; badgeText = 'بنك'; }
 
+                    const bk = extractBrandKey(lm.name);
+                    const branchLoc = bk ? extractBranchLocation(lm.name, bk) : '';
+                    const isMultiBranchItem = bk && ((brandGroups[bk] && brandGroups[bk].length > 1) || ((typeof localLandmarks !== 'undefined') && localLandmarks.filter(l => extractBrandKey(l.name) === bk).length > 1));
+
+                    const badgeStyle = isMultiBranchItem
+                        ? 'background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; font-weight: 700;'
+                        : 'background: #F1F5F9; color: #475569;';
+
+                    const displayedBadge = (isMultiBranchItem && branchLoc && branchLoc !== lm.name)
+                        ? `فرع ${branchLoc}`
+                        : badgeText;
+
                     const li = document.createElement('li');
                     li.className = 'map-area-autocomplete-item';
                     li.innerHTML = `
                         <div class="item-title-row">
                             <span class="item-title">${icon} ${lm.name}</span>
-                            <span class="item-badge" style="background: #F1F5F9; color: #475569;">${badgeText}</span>
+                            <span class="item-badge" style="${badgeStyle}">${displayedBadge}</span>
                         </div>
-                        <div class="item-desc">معلم محلي في عمان</div>
+                        <div class="item-desc">${isMultiBranchItem ? `فرع من فروع ${bk} في محافظة العاصمة` : 'معلم محلي في عمان'}</div>
                     `;
                     li.onclick = () => {
                         selectMapAreaSearchItem(lm.lat, lm.lon, lm.name);
@@ -3792,7 +4135,8 @@
             }
         });
 
-        function initOrUpdateMap(placeLat, placeLon, stations) {
+        function initOrUpdateMap(placeLat, placeLon, stations, placeDisplayName) {
+            placeDisplayName = placeDisplayName || (currentSearch ? currentSearch.placeDisplayName : '');
             if (typeof L === 'undefined') {
                 console.error("Leaflet is not loaded.");
                 return;
@@ -3858,6 +4202,7 @@
             } else {
                 markers.forEach(m => stationMap.removeLayer(m));
                 markers = [];
+                clearBranchMarkers();
                 currentRouteLine = null;
             }
             
@@ -3915,7 +4260,12 @@
 
             // معاينة بيانات النتيجة في صندوق البطاقة على الخريطة
             if (!isInitialLoad && stations && stations.length > 0) {
-                updateMapResultCard(stations[0], placeLat, placeLon, currentSearch ? currentSearch.placeDisplayName : '');
+                updateMapResultCard(stations[0], placeLat, placeLon, placeDisplayName);
+            }
+
+            // إظهار علامات فروع المنشأة الأخرى إن وجدت
+            if (!isInitialLoad && placeDisplayName) {
+                renderEstablishmentBranchMarkers(placeDisplayName, placeLat, placeLon);
             }
 
             // نقل العرض وتكبير المكان الذي بالنتيجة
@@ -4006,9 +4356,31 @@
             }
         }
 
-        function renderStationHeroCard(station, originLat, originLon) {
+        function renderStationHeroCard(station, originLat, originLon, originDisplayName) {
             const cardContainer = document.getElementById('mainStationCard');
             if (!cardContainer || !station) return;
+
+            const placeName = originDisplayName || (currentSearch ? currentSearch.placeDisplayName : '');
+            const siblingBranches = findSiblingBranches(placeName, originLat, originLon);
+            const brandKey = extractBrandKey(placeName);
+            let branchesHtml = '';
+            if (siblingBranches.length > 0) {
+                branchesHtml = `
+                    <div class="hero-card-branches" style="margin-top:8px; padding-top:6px; border-top:1px dashed #CBD5E1;">
+                        <div style="font-size:0.75rem; font-weight:800; color:#B45309; display:flex; align-items:center; gap:4px; margin-bottom:5px;">
+                            <span>🏢</span>
+                            <span>فروع أخرى متوفرة للمنشأة (${siblingBranches.length} فروع):</span>
+                        </div>
+                        <div class="branch-chips-scroll" style="display:flex; gap:5px; overflow-x:auto; padding-bottom:3px; -webkit-overflow-scrolling:touch; scrollbar-width:thin;">
+                            ${siblingBranches.map(b => {
+                                const loc = extractBranchLocation(b.name, brandKey);
+                                const safeName = b.name.replace(/'/g, "\\'");
+                                return `<button type="button" class="branch-chip" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">📍 ${loc}</button>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
 
             const dirUrl = `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLon}&destination=${station.lat},${station.lon}`;
             const phoneClean = station.phone ? station.phone.replace(/[^0-9]/g, '') : '064643111';
@@ -4033,7 +4405,8 @@
                         <span style="font-size: 0.8rem;">${station.mutasarrifiya || 'قصبة عمان'}</span>
                     </div>
                 </div>
-                <div class="station-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                ${branchesHtml}
+                <div class="station-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 8px;">
                     <button type="button" onclick="switchResponsiveView('map'); forceMapResize();" class="action-btn" style="background:#0D2E58; color:#ffffff; padding: 6px 8px; font-size: 0.78rem; border-radius: var(--radius-md); border:none; cursor:pointer;">
                         🗺️ الخريطة
                     </button>
@@ -4257,7 +4630,7 @@
 
                 // Update Leaflet Map for Panel 3
                 setTimeout(() => {
-                    initOrUpdateMap(placeLat, placeLon, uniqueStations.slice(0, 11));
+                    initOrUpdateMap(placeLat, placeLon, uniqueStations.slice(0, 11), placeDisplayName);
                     selectStation(0);
                 }, 100);
 

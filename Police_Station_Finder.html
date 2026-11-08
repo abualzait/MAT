@@ -1708,7 +1708,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.16</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.17</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -3375,24 +3375,80 @@
             }
         }
 
-        function createSvgIcon(color) {
-            let pinColor = '#3B82F6'; // blue
-            if (color === 'green') pinColor = '#10B981';
-            else if (color === 'red') pinColor = '#EF4444';
+        // ═══ DISTINCT MAP MARKER ICONS (POLICE SHIELDS VS TARGET PINS) ═══
 
-            const svg = `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 30" width="30" height="38">
-                    <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 18 12 18s12-9 12-18c0-6.63-5.37-12-12-12zm0 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z" fill="${pinColor}" stroke="#FFFFFF" stroke-width="1.5"/>
-                    <circle cx="12" cy="12" r="4" fill="#FFFFFF"/>
-                </svg>
+        // 1. Search Result Target Marker: Emerald green location pin with target bullseye
+        function createSearchResultMarkerIcon() {
+            const html = `
+                <div class="search-target-marker" style="position:relative; width:34px; height:42px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 3px 6px rgba(16,185,129,0.45));">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 30" width="34" height="42">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 18 12 18s12-9 12-18c0-6.63-5.37-12-12-12z" fill="#10B981" stroke="#FFFFFF" stroke-width="2"/>
+                        <circle cx="12" cy="12" r="6" fill="#FFFFFF"/>
+                        <circle cx="12" cy="12" r="3" fill="#059669"/>
+                    </svg>
+                    <div style="position:absolute; top:4px; font-size:12px; pointer-events:none;">📍</div>
+                </div>
             `;
             return L.divIcon({
-                html: svg,
-                className: 'svg-marker-icon',
-                iconSize: [30, 38],
-                iconAnchor: [15, 38],
-                popupAnchor: [0, -34]
+                html: html,
+                className: 'search-target-marker-icon',
+                iconSize: [34, 42],
+                iconAnchor: [17, 42],
+                popupAnchor: [0, -38]
             });
+        }
+
+        // 2. Police Station Marker: Authentic security shield badge (completely distinct from location pins)
+        function createPoliceStationMarkerIcon(isMain = false) {
+            if (isMain) {
+                // Primary / Nearest Police Station: Royal Navy Shield with Radiant Gold Border & Officer Emblem
+                const html = `
+                    <div class="police-shield-marker main-station-marker" style="position:relative; width:42px; height:50px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 4px 10px rgba(13,46,88,0.55));">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 44" width="42" height="50">
+                            <!-- Outer Police Shield -->
+                            <path d="M18 2 L33 7 C33 22 25 36 18 42 C11 36 3 22 3 7 Z" fill="#0D2E58" stroke="#F59E0B" stroke-width="2.5"/>
+                            <!-- Inner Shield Accent -->
+                            <path d="M18 6 L29 10 C29 21 23 32 18 37 C13 32 7 21 7 10 Z" fill="#1E3A8A" opacity="0.95"/>
+                        </svg>
+                        <div style="position:absolute; top:7px; font-size:16px; line-height:1; pointer-events:none;">👮</div>
+                        <div style="position:absolute; bottom:-1px; background:#F59E0B; color:#0D2E58; font-size:8.5px; font-weight:900; padding:1px 5px; border-radius:4px; font-family:'Tajawal',sans-serif; border:1px solid #FFFFFF; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,0.3);">أمني</div>
+                    </div>
+                `;
+                return L.divIcon({
+                    html: html,
+                    className: 'police-station-marker-icon main',
+                    iconSize: [42, 50],
+                    iconAnchor: [21, 50],
+                    popupAnchor: [0, -46]
+                });
+            } else {
+                // Other / Surrounding Police Stations: Blue Security Shield with Silver/White Border
+                const html = `
+                    <div class="police-shield-marker secondary-station-marker" style="position:relative; width:32px; height:38px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 3px 6px rgba(13,46,88,0.4));">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 44" width="32" height="38">
+                            <!-- Outer Police Shield -->
+                            <path d="M18 2 L33 7 C33 22 25 36 18 42 C11 36 3 22 3 7 Z" fill="#1E40AF" stroke="#FFFFFF" stroke-width="2"/>
+                            <!-- Inner Shield Accent -->
+                            <path d="M18 6 L29 10 C29 21 23 32 18 37 C13 32 7 21 7 10 Z" fill="#2563EB" opacity="0.9"/>
+                        </svg>
+                        <div style="position:absolute; top:5px; font-size:13px; line-height:1; pointer-events:none;">🛡️</div>
+                    </div>
+                `;
+                return L.divIcon({
+                    html: html,
+                    className: 'police-station-marker-icon secondary',
+                    iconSize: [32, 38],
+                    iconAnchor: [16, 38],
+                    popupAnchor: [0, -36]
+                });
+            }
+        }
+
+        // Backward compatibility wrapper
+        function createSvgIcon(color) {
+            if (color === 'green') return createSearchResultMarkerIcon();
+            if (color === 'red') return createPoliceStationMarkerIcon(true);
+            return createPoliceStationMarkerIcon(false);
         }
 
 
@@ -4314,7 +4370,7 @@
                 currentRouteLine = null;
             }
             
-            const originIcon = createSvgIcon('green');
+            const originIcon = createSearchResultMarkerIcon();
             
             if (placeLat && placeLon) {
                 const originMarker = L.marker([placeLat, placeLon], {icon: originIcon, zIndexOffset: 1000}).addTo(stationMap)
@@ -4336,7 +4392,7 @@
             if (stations) {
                 stations.forEach((st, index) => {
                     const isMain = index === 0;
-                    const stIcon = createSvgIcon(isMain ? 'red' : 'blue');
+                    const stIcon = createPoliceStationMarkerIcon(isMain);
                     
                     const zIndexMarker = isMain ? 900 : 100;
                     
@@ -4376,21 +4432,30 @@
                 renderEstablishmentBranchMarkers(placeDisplayName, placeLat, placeLon);
             }
 
-            // نقل العرض وتكبير المكان الذي بالنتيجة
-            if (!isInitialLoad && placeLat && placeLon && stationMap) {
-                stationMap.flyTo([placeLat, placeLon], 16, {
+            // ضبط وتكبير الخريطة بحيث تظهر الألوية جميعها مع إبراز الموقع والمركز الأمني
+            if (!isInitialLoad && stationMap) {
+                // نطاق شامل يستوعب كافة ألوية محافظة العاصمة التسعة
+                const allLiwasEnvelope = L.latLngBounds([31.65, 35.68], [32.10, 36.25]);
+                if (placeLat && placeLon) {
+                    allLiwasEnvelope.extend([placeLat, placeLon]);
+                }
+                if (stations && stations.length > 0) {
+                    stations.slice(0, 5).forEach(st => allLiwasEnvelope.extend([st.lat, st.lon]));
+                }
+                stationMap.fitBounds(allLiwasEnvelope, {
+                    padding: [25, 25],
                     animate: true,
-                    duration: 1.5
+                    duration: 1.2
                 });
+
                 if (originMarker) {
                     setTimeout(() => {
                         try { originMarker.openPopup(); } catch(e){}
-                    }, 800);
+                    }, 650);
                 }
             } else if (markers.length > 0 && stationMap && !isInitialLoad) {
                 const group = new L.featureGroup(markers);
                 stationMap.fitBounds(group.getBounds().pad(0.1));
-                if (stationMap.getZoom() > 16) stationMap.setZoom(16);
             }
             forceMapResize();
         }

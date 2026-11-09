@@ -1708,7 +1708,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.18</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.19</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -2350,7 +2350,8 @@
                     li.onclick = () => {
                         document.getElementById('placeInput').value = st.name;
                         resultsContainer.classList.remove('active');
-                        fetchStationsForCoords(st.lat, st.lon, st.name);
+                        hasAppliedInitialResultZoom = false;
+                        fetchStationsForCoords(st.lat, st.lon, st.name, true);
                     };
                     resultsContainer.appendChild(li);
                 });
@@ -2383,7 +2384,8 @@
                     li.onclick = () => {
                         document.getElementById('placeInput').value = area.name;
                         resultsContainer.classList.remove('active');
-                        fetchStationsForCoords(area.lat, area.lon, area.name);
+                        hasAppliedInitialResultZoom = false;
+                        fetchStationsForCoords(area.lat, area.lon, area.name, true);
                     };
                     resultsContainer.appendChild(li);
                 });
@@ -2479,7 +2481,8 @@
                     li.onclick = () => {
                         document.getElementById('placeInput').value = lm.name;
                         resultsContainer.classList.remove('active');
-                        fetchStationsForCoords(lm.lat, lm.lon, lm.name);
+                        hasAppliedInitialResultZoom = false;
+                        fetchStationsForCoords(lm.lat, lm.lon, lm.name, true);
                     };
                     resultsContainer.appendChild(li);
                 });
@@ -2516,7 +2519,8 @@
                         const targetName = name + (descParts[0] ? ` (${descParts[0]})` : '');
                         document.getElementById('placeInput').value = targetName;
                         resultsContainer.classList.remove('active');
-                        fetchStationsForCoords(lat, lon, targetName);
+                        hasAppliedInitialResultZoom = false;
+                        fetchStationsForCoords(lat, lon, targetName, true);
                     };
                     resultsContainer.appendChild(li);
                 });
@@ -3568,7 +3572,7 @@
                         </div>
                         <div style="font-size:1.0rem; font-weight:800; color:#0D2E58; margin-bottom:4px;">${b.name}</div>
                         <div style="font-size:0.8rem; color:#475569; margin-bottom:10px;">📍 الموقع: <b>${branchLoc}</b></div>
-                        <button type="button" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" style="display:block; width:100%; text-align:center; background:#0D2E58; color:#fff; padding:6px 10px; border:none; border-radius:6px; font-size:0.82rem; font-weight:700; cursor:pointer; font-family:'Tajawal',sans-serif; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+                        <button type="button" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}', false)" style="display:block; width:100%; text-align:center; background:#0D2E58; color:#fff; padding:6px 10px; border:none; border-radius:6px; font-size:0.82rem; font-weight:700; cursor:pointer; font-family:'Tajawal',sans-serif; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
                             🎯 تحديد أقرب مركز أمني لهذا الفرع
                         </button>
                     </div>
@@ -3605,11 +3609,12 @@
             }));
             renderPlacesPanel(branchMatches);
 
-            fetchStationsForCoords(firstBranch.lat, firstBranch.lon, firstBranch.name).then(() => {
+            fetchStationsForCoords(firstBranch.lat, firstBranch.lon, firstBranch.name, false).then(() => {
                 setTimeout(() => {
                     if (stationMap && (markers.length > 0 || branchMarkers.length > 0)) {
                         const allMarkersGroup = new L.featureGroup([...markers, ...branchMarkers]);
                         stationMap.fitBounds(allMarkersGroup.getBounds().pad(0.18));
+                        hasAppliedInitialResultZoom = true;
                     }
                 }, 350);
             });
@@ -3843,7 +3848,7 @@
                                 else if (b.type === 'bank') sym = '🏦';
 
                                 return `
-                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">
+                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}', false)" title="${b.name}">
                                         <div class="branch-item-main">
                                             <span class="branch-item-icon">${sym}</span>
                                             <div class="branch-item-text">
@@ -4069,7 +4074,7 @@
                         </div>
                     `;
                     li.onclick = () => {
-                        selectMapAreaSearchItem(st.lat, st.lon, st.name);
+                        selectMapAreaSearchItem(st.lat, st.lon, st.name, true);
                     };
                     list.appendChild(li);
                 });
@@ -4102,7 +4107,7 @@
                         </div>
                     `;
                     li.onclick = () => {
-                        selectMapAreaSearchItem(ar.lat, ar.lon, ar.name);
+                        selectMapAreaSearchItem(ar.lat, ar.lon, ar.name, true);
                     };
                     list.appendChild(li);
                 });
@@ -4193,7 +4198,7 @@
                         <div class="item-desc">${isMultiBranchItem ? `فرع من فروع ${bk} في محافظة العاصمة` : 'معلم محلي في عمان'}</div>
                     `;
                     li.onclick = () => {
-                        selectMapAreaSearchItem(lm.lat, lm.lon, lm.name);
+                        selectMapAreaSearchItem(lm.lat, lm.lon, lm.name, true);
                     };
                     list.appendChild(li);
                 });
@@ -4206,7 +4211,9 @@
             }
         }
 
-        function selectMapAreaSearchItem(lat, lon, displayName) {
+        var hasAppliedInitialResultZoom = false;
+
+        function selectMapAreaSearchItem(lat, lon, displayName, forceLiwaZoom = null) {
             const mapInput = document.getElementById('mapAreaSearchInput');
             if (mapInput) {
                 mapInput.value = displayName;
@@ -4218,19 +4225,20 @@
             }
             closeMapAreaAutocomplete();
 
-            fetchStationsForCoords(lat, lon, displayName);
+            fetchStationsForCoords(lat, lon, displayName, forceLiwaZoom);
         }
 
         async function executeDirectMapSearch(query) {
             setLoading(true);
+            hasAppliedInitialResultZoom = false; // Reset zoom flag for fresh direct search
             try {
                 const matches = await gatherSearchMatches(query);
                 if (matches && matches.length > 0) {
-                    selectMapAreaSearchItem(matches[0].lat, matches[0].lon, matches[0].name);
+                    selectMapAreaSearchItem(matches[0].lat, matches[0].lon, matches[0].name, true);
                 } else {
                     const geocodeData = await flexibleGeocode(query);
                     if (geocodeData) {
-                        selectMapAreaSearchItem(geocodeData.lat, geocodeData.lon, query);
+                        selectMapAreaSearchItem(geocodeData.lat, geocodeData.lon, query, true);
                     } else {
                         showError("لم نتمكن من تحديد موقع المنطقة المطلوبة بدقة.");
                     }
@@ -4325,7 +4333,7 @@
             }
         });
 
-        function initOrUpdateMap(placeLat, placeLon, stations, placeDisplayName) {
+        function initOrUpdateMap(placeLat, placeLon, stations, placeDisplayName, forceLiwaZoom = null) {
             placeDisplayName = placeDisplayName || (currentSearch ? currentSearch.placeDisplayName : '');
             if (typeof L === 'undefined') {
                 console.error("Leaflet is not loaded.");
@@ -4375,7 +4383,7 @@
                                     mapSearchInput.value = shortName;
                                     toggleMapAreaClearBtn(true);
                                 }
-                                await fetchStationsForCoords(lat, lon, shortName);
+                                await fetchStationsForCoords(lat, lon, shortName, false);
                                 return;
                             }
                         }
@@ -4387,7 +4395,7 @@
                         mapSearchInput.value = "الموقع المحدد على الخريطة";
                         toggleMapAreaClearBtn(true);
                     }
-                    await fetchStationsForCoords(lat, lon, "الموقع المحدد على الخريطة");
+                    await fetchStationsForCoords(lat, lon, "الموقع المحدد على الخريطة", false);
                 });
             } else {
                 markers.forEach(m => stationMap.removeLayer(m));
@@ -4397,9 +4405,10 @@
             }
             
             const originIcon = createSearchResultMarkerIcon();
+            let originMarker = null;
             
             if (placeLat && placeLon) {
-                const originMarker = L.marker([placeLat, placeLon], {icon: originIcon, zIndexOffset: 1000}).addTo(stationMap)
+                originMarker = L.marker([placeLat, placeLon], {icon: originIcon, zIndexOffset: 1000}).addTo(stationMap)
                     .bindPopup("<b>موقعك المستهدف</b>");
                 markers.push(originMarker);
 
@@ -4426,7 +4435,7 @@
                         .bindPopup(`<b>${st.name}</b><br>على بعد ${st.dist.toFixed(2)} كم${st.phone ? `<br>هاتف: ${st.phone}` : ''}`);
                     
                     m.on('click', function() {
-                        selectStation(index);
+                        selectStation(index, true);
                     });
                     
                     markers.push(m);
@@ -4459,26 +4468,52 @@
                 renderEstablishmentBranchMarkers(placeDisplayName, placeLat, placeLon);
             }
 
-            // ضبط وتكبير الخريطة على حجم اللواء التابع للنتيجة لعرض الموقع ضمن حدود اللواء
+            // ضبط وتكبير الخريطة: عند ظهور النتيجة الأولى فقط يتم تكبير الخريطة على حجم اللواء
+            // أما إذا نقر المستخدم على أي مكان لاحقاً، يتم الاحتفاظ بمستوى التكبير الحالي (Keep zoom as is)
+            let shouldApplyLiwaZoom = false;
             if (!isInitialLoad && stationMap) {
-                let liwaBounds = targetLiwa ? getLiwaBounds(targetLiwa) : null;
-                
-                if (liwaBounds && liwaBounds.isValid()) {
-                    // التأكد من شمول موقع البحث والمركز الأمني الأقرب داخل إطار الرؤية
+                if (forceLiwaZoom === true) {
+                    shouldApplyLiwaZoom = true;
+                    hasAppliedInitialResultZoom = true;
+                } else if (forceLiwaZoom === false) {
+                    shouldApplyLiwaZoom = false;
+                    hasAppliedInitialResultZoom = true;
+                } else {
+                    if (!hasAppliedInitialResultZoom) {
+                        shouldApplyLiwaZoom = true;
+                        hasAppliedInitialResultZoom = true;
+                    } else {
+                        shouldApplyLiwaZoom = false;
+                    }
+                }
+
+                if (shouldApplyLiwaZoom) {
+                    let liwaBounds = targetLiwa ? getLiwaBounds(targetLiwa) : null;
+                    if (liwaBounds && liwaBounds.isValid()) {
+                        // التأكد من شمول موقع البحث والمركز الأمني الأقرب داخل إطار الرؤية
+                        if (placeLat && placeLon) {
+                            liwaBounds.extend([placeLat, placeLon]);
+                        }
+                        if (stations && stations.length > 0) {
+                            liwaBounds.extend([stations[0].lat, stations[0].lon]);
+                        }
+                        stationMap.fitBounds(liwaBounds, {
+                            padding: [30, 30],
+                            maxZoom: 14,
+                            animate: true,
+                            duration: 1.2
+                        });
+                    } else if (placeLat && placeLon) {
+                        stationMap.setView([placeLat, placeLon], 13);
+                    }
+                } else {
+                    // النقر على مكان آخر: الاحتفاظ بمستوى التكبير كما هو والاكتفاء بالتحريك السلس panTo
                     if (placeLat && placeLon) {
-                        liwaBounds.extend([placeLat, placeLon]);
+                        stationMap.panTo([placeLat, placeLon], {
+                            animate: true,
+                            duration: 0.8
+                        });
                     }
-                    if (stations && stations.length > 0) {
-                        liwaBounds.extend([stations[0].lat, stations[0].lon]);
-                    }
-                    stationMap.fitBounds(liwaBounds, {
-                        padding: [30, 30],
-                        maxZoom: 14,
-                        animate: true,
-                        duration: 1.2
-                    });
-                } else if (placeLat && placeLon) {
-                    stationMap.setView([placeLat, placeLon], 13);
                 }
 
                 if (originMarker) {
@@ -4527,7 +4562,7 @@
                 item.style.marginBottom = '0.4rem';
                 item.style.borderRadius = 'var(--radius-md)';
 
-                item.onclick = () => selectPlaceMatch(idx);
+                item.onclick = () => selectPlaceMatch(idx, false);
 
                 item.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -4542,7 +4577,7 @@
             });
         }
 
-        async function selectPlaceMatch(idx) {
+        async function selectPlaceMatch(idx, isInitial = false) {
             if (!currentSearchMatches[idx]) return;
             selectedPlaceIndex = idx;
             const match = currentSearchMatches[idx];
@@ -4554,7 +4589,7 @@
             document.getElementById('placeInput').value = match.name;
 
             // Fetch police stations for this coordinate & populate Panel 2 + Panel 3
-            await fetchStationsForCoords(match.lat, match.lon, match.name);
+            await fetchStationsForCoords(match.lat, match.lon, match.name, isInitial);
 
             // If narrow screen or iframe, automatically activate map view to reveal shading and card box
             if (isNarrowScreenOrIframe()) {
@@ -4592,7 +4627,7 @@
                                 else if (b.type === 'bank') sym = '🏦';
 
                                 return `
-                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}')" title="${b.name}">
+                                    <div class="branch-vertical-item" onclick="selectMapAreaSearchItem(${b.lat}, ${b.lon}, '${safeName}', false)" title="${b.name}">
                                         <div class="branch-item-main">
                                             <span class="branch-item-icon">${sym}</span>
                                             <div class="branch-item-text">
@@ -4647,15 +4682,15 @@
             `;
         }
 
-        function selectStation(idx) {
+        function selectStation(idx, shouldPan = true) {
             if (!currentSearch || !currentSearch.stations || !currentSearch.stations[idx]) return;
             selectedStationIndex = idx;
             const st = currentSearch.stations[idx];
 
-            renderStationHeroCard(st, currentSearch.placeLat, currentSearch.placeLon);
+            renderStationHeroCard(st, currentSearch.placeLat, currentSearch.placeLon, currentSearch.placeDisplayName);
             updateMapResultCard(st, currentSearch.placeLat, currentSearch.placeLon, currentSearch.placeDisplayName);
 
-            if (st.marker && stationMap) {
+            if (shouldPan && st.marker && stationMap) {
                 st.marker.openPopup();
                 stationMap.panTo([st.lat, st.lon]);
             }
@@ -4668,6 +4703,9 @@
                 showError("الرجاء إدخال اسم المكان.");
                 return;
             }
+
+            // Reset initial zoom flag for fresh search so first result zooms to Liwa bounds
+            hasAppliedInitialResultZoom = false;
 
             // Hide autocomplete dropdown
             const resultsContainer = document.getElementById('autocompleteResults');
@@ -4710,10 +4748,10 @@
                         lon: placeLon
                     };
                     renderPlacesPanel([singleGeocodeMatch]);
-                    selectPlaceMatch(0);
+                    selectPlaceMatch(0, true);
                 } else {
                     renderPlacesPanel(matches);
-                    selectPlaceMatch(0);
+                    selectPlaceMatch(0, true);
                 }
 
             } catch (err) {
@@ -4729,6 +4767,9 @@
                 return;
             }
             
+            // Reset initial zoom flag for fresh geolocation search
+            hasAppliedInitialResultZoom = false;
+
             hideError();
             setLoading(true);
             document.getElementById('placeInput').value = "جاري التحديد...";
@@ -4748,7 +4789,7 @@
                     lon: lon
                 };
                 renderPlacesPanel([myLocationMatch]);
-                selectPlaceMatch(0);
+                selectPlaceMatch(0, true);
                 
             }, (error) => {
                 setLoading(false);
@@ -4797,7 +4838,7 @@
             return uniqueStations;
         }
 
-        async function fetchStationsForCoords(placeLat, placeLon, placeDisplayName) {
+        async function fetchStationsForCoords(placeLat, placeLon, placeDisplayName, forceLiwaZoom = null) {
             if (placeLat < 31.7 || placeLat > 32.2 || placeLon < 35.6 || placeLon > 36.3) {
                 showError("عذراً، هذا التطبيق مخصص لمحافظة عمان فقط. يرجى اختيار موقع داخل حدود العاصمة.");
                 setLoading(false);
@@ -4817,7 +4858,7 @@
 
                 // Render main station card for Panel 2
                 if (uniqueStations.length > 0) {
-                    renderStationHeroCard(uniqueStations[0], placeLat, placeLon);
+                    renderStationHeroCard(uniqueStations[0], placeLat, placeLon, placeDisplayName);
                 }
 
                 // Render surrounding stations list inside Panel 2
@@ -4857,8 +4898,8 @@
 
                 // Update Leaflet Map for Panel 3
                 setTimeout(() => {
-                    initOrUpdateMap(placeLat, placeLon, uniqueStations.slice(0, 11), placeDisplayName);
-                    selectStation(0);
+                    initOrUpdateMap(placeLat, placeLon, uniqueStations.slice(0, 11), placeDisplayName, forceLiwaZoom);
+                    selectStation(0, false);
                 }, 100);
 
             } catch(e) {

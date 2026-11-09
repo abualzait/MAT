@@ -1,6 +1,13 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.45.18)
+## Current Features (Version 1.45.19)
+
+### التحديث v1.45.19 (تطبيق تكبير اللواء على النتيجة الأولى فقط والاحتفاظ بمستوى التكبير عند النقر على أي مكان لاحقاً)
+1. **تكبير اللواء للنتيجة الأولى فقط (Initial-Result-Only Liwa Zoom):**
+   - تم ضبط تكبير الخريطة على حجم اللواء (`fitBounds(liwaBounds)`) ليعمل **فقط عند النتيجة الأولى للبحث** (سواء عبر مربع البحث الرئيسي أو البحث المباشر في منطقة الخريطة أو الإكمال التلقائي أو زر تحديد الموقع).
+2. **الاحتفاظ بمستوى التكبير التام عند نقر المستخدم (Preserve Zoom Level on Place/Branch/Map Clicks):**
+   - إذا نقر المستخدم لاحقاً على أي مكان (مكان آخر في القائمة، فرع من فروع المنشأة، علامة فرع على الخريطة، مركز أمني، أو النقر المباشر على الخريطة): **لا يتغير مستوى التكبير نهائياً (Keep zoom as is)**.
+   - يتم الاكتفاء بالتحريك السلس لكاميرا الخريطة نحو الإحداثيات المستهدفة (`stationMap.panTo([lat, lon])`) مع الحفاظ التام على مستوى التقريب الحالي الذي اختاره أو عدّله المستخدم.
 
 1. **Complaints & Cases Management (`/complaints/app`):**
    - Record, view, and process citizen complaints and administrative cases.

@@ -1708,7 +1708,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.19</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.20</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -4333,6 +4333,117 @@
             }
         });
 
+        // دالة استكشاف واستخراج اسم المكان الدقيق (منشأة، شارع، حي) عند النقر على الخريطة
+        async function resolveClickPlaceName(lat, lon) {
+            // 1. فحص المعالم المحلية الموثقة بالأردن إذا كان النقر ملاصقاً لمنشأة معروفة (ضمن 80 متراً)
+            if (typeof localLandmarks !== 'undefined' && localLandmarks.length > 0) {
+                let closestLm = null;
+                let minDist = 0.08; // 80 meters
+                for (let lm of localLandmarks) {
+                    const d = calculateDistance(lat, lon, lm.lat, lm.lon);
+                    if (d < minDist) {
+                        minDist = d;
+                        closestLm = lm;
+                    }
+                }
+                if (closestLm) {
+                    return {
+                        name: closestLm.name,
+                        type: closestLm.type || 'landmark',
+                        icon: '🏢',
+                        desc: `معلم في العاصمة عمان`
+                    };
+                }
+            }
+
+            // 2. استعلام عكسي تفصيلي فائق الدقة (zoom=18 مع تفاصيل العنوان كاملة)
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4500);
+                const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=ar`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                if (revRes.ok) {
+                    const revData = await revRes.json();
+                    if (revData) {
+                        const addr = revData.address || {};
+                        const establishment = revData.name || addr.amenity || addr.shop || addr.building || addr.office || addr.tourism || addr.leisure || addr.healthcare || addr.craft;
+                        const street = addr.road || addr.street || addr.pedestrian || addr.footway;
+                        const suburb = addr.neighbourhood || addr.suburb || addr.district || addr.quarter || addr.town || addr.village;
+
+                        let title = '';
+                        let icon = '📍';
+                        let type = 'location';
+
+                        if (establishment && street && establishment !== street) {
+                            title = `${establishment} (${street})`;
+                            icon = '🏢';
+                            type = 'establishment';
+                        } else if (establishment) {
+                            title = suburb ? `${establishment} - ${suburb}` : establishment;
+                            icon = '🏢';
+                            type = 'establishment';
+                        } else if (street) {
+                            title = suburb ? `${street} - ${suburb}` : street;
+                            icon = '🛣️';
+                            type = 'street';
+                        } else if (suburb) {
+                            title = suburb;
+                            icon = '🏘️';
+                            type = 'neighborhood';
+                        } else if (revData.display_name) {
+                            const cleanParts = revData.display_name.split(',')
+                                .map(p => p.trim())
+                                .filter(p => !p.startsWith("قضاء") && p !== "الأردن" && !/^\d{5}$/.test(p));
+                            title = cleanParts.slice(0, 2).join(', ');
+                        }
+
+                        if (title) {
+                            return {
+                                name: title,
+                                type: type,
+                                icon: icon,
+                                desc: revData.display_name ? revData.display_name.split(',').slice(0, 3).join(', ') : 'موقع محدد'
+                            };
+                        }
+                    }
+                }
+            } catch(e) {
+                console.warn("Reverse geocode fetch failed:", e);
+            }
+
+            // 3. فحص الأحياء والمناطق المحلية من قاعدة البيانات المدمجة (ضمن 350 متراً)
+            if (typeof ammanAreas !== 'undefined' && ammanAreas.length > 0) {
+                let closestArea = null;
+                let minAreaDist = 0.35; // 350 meters
+                for (let ar of ammanAreas) {
+                    const d = calculateDistance(lat, lon, ar.lat, ar.lon);
+                    if (d < minAreaDist) {
+                        minAreaDist = d;
+                        closestArea = ar;
+                    }
+                }
+                if (closestArea) {
+                    return {
+                        name: closestArea.name,
+                        type: 'neighborhood',
+                        icon: closestArea.name.includes('دوار') ? '🔄' : '🏘️',
+                        desc: `${closestArea.liwa || 'عمان'} | حي سكني`
+                    };
+                }
+            }
+
+            // 4. خيار احتياطي باعتماد اللواء التابع له الإحداثي
+            const targetLiwa = getLiwaForCoords(lat, lon);
+            return {
+                name: targetLiwa ? `موقع في ${targetLiwa}` : "الموقع المحدد على الخريطة",
+                type: 'coordinates',
+                icon: '📍',
+                desc: `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+            };
+        }
+
         function initOrUpdateMap(placeLat, placeLon, stations, placeDisplayName, forceLiwaZoom = null) {
             placeDisplayName = placeDisplayName || (currentSearch ? currentSearch.placeDisplayName : '');
             if (typeof L === 'undefined') {
@@ -4366,36 +4477,29 @@
                     
                     hideError();
                     setLoading(true);
-                    document.getElementById('placeInput').value = "جاري تحديد موقع النقر على الخريطة...";
+                    document.getElementById('placeInput').value = "جاري استكشاف اسم المكان أو الشارع...";
                     
-                    try {
-                        const revRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&accept-language=ar`);
-                        if(revRes.ok) {
-                            const revData = await revRes.json();
-                            if (revData && revData.display_name) {
-                                const cleanParts = revData.display_name.split(',')
-                                    .map(p => p.trim())
-                                    .filter(p => !p.startsWith("قضاء") && p !== "الأردن" && !/^\d{5}$/.test(p));
-                                const shortName = cleanParts.slice(0, 2).join(', ');
-                                document.getElementById('placeInput').value = shortName;
-                                const mapSearchInput = document.getElementById('mapAreaSearchInput');
-                                if (mapSearchInput) {
-                                    mapSearchInput.value = shortName;
-                                    toggleMapAreaClearBtn(true);
-                                }
-                                await fetchStationsForCoords(lat, lon, shortName, false);
-                                return;
-                            }
-                        }
-                    } catch(e) {}
-                    
-                    document.getElementById('placeInput').value = "الموقع المحدد على الخريطة";
+                    const placeInfo = await resolveClickPlaceName(lat, lon);
+                    const placeName = placeInfo.name;
+
+                    document.getElementById('placeInput').value = placeName;
                     const mapSearchInput = document.getElementById('mapAreaSearchInput');
                     if (mapSearchInput) {
-                        mapSearchInput.value = "الموقع المحدد على الخريطة";
+                        mapSearchInput.value = placeName;
                         toggleMapAreaClearBtn(true);
                     }
-                    await fetchStationsForCoords(lat, lon, "الموقع المحدد على الخريطة", false);
+
+                    // تحديث قائمة الأماكن المطابقة (Panel 1) لتعكس المكان المنقور عليه
+                    renderPlacesPanel([{
+                        name: placeName,
+                        desc: placeInfo.desc || 'موقع محدد على الخريطة',
+                        type: placeInfo.type || 'clicked',
+                        icon: placeInfo.icon || '📍',
+                        lat: lat,
+                        lon: lon
+                    }]);
+
+                    await fetchStationsForCoords(lat, lon, placeName, false);
                 });
             } else {
                 markers.forEach(m => stationMap.removeLayer(m));
@@ -4403,13 +4507,65 @@
                 clearBranchMarkers();
                 currentRouteLine = null;
             }
+
+            // تحديد اللواء التابع للنتيجة وتطبيق التظليل المناسب
+            const isInitialLoad = (!stations || stations.length === 0) && (placeLat === 31.95 && placeLon === 35.92);
+            let targetLiwa = null;
+            if (!isInitialLoad) {
+                if (placeLat && placeLon) {
+                    targetLiwa = getLiwaForCoords(placeLat, placeLon);
+                }
+                if (!targetLiwa && stations && stations.length > 0 && stations[0].mutasarrifiya) {
+                    targetLiwa = stations[0].mutasarrifiya;
+                }
+            }
+            
+            // تطبيق تظليل الألوية (إبقاء اللواء الناتج بدون تظليل وتظليل الباقي بألوان مختلفة)
+            updateLiwaShading(targetLiwa);
             
             const originIcon = createSearchResultMarkerIcon();
             let originMarker = null;
             
             if (placeLat && placeLon) {
+                let displayName = (placeDisplayName && placeDisplayName.trim()) ? placeDisplayName : '';
+                if (!displayName || displayName === 'الموقع المحدد على الخريطة') {
+                    displayName = targetLiwa ? `موقع في ${targetLiwa}` : 'الموقع المحدد';
+                }
+
+                // اختيار أيقونة مناسبة للمكان المحدد بناءً على اسمه أو نوعه
+                let placeIcon = '📍';
+                if (displayName.includes('شارع') || displayName.includes('طريق')) placeIcon = '🛣️';
+                else if (displayName.includes('دوار') || displayName.includes('ميدان')) placeIcon = '🔄';
+                else if (displayName.includes('مسجد') || displayName.includes('جامع')) placeIcon = '🕌';
+                else if (displayName.includes('مستشفى') || displayName.includes('طبي') || displayName.includes('عيادة') || displayName.includes('مركز صحي')) placeIcon = '🏥';
+                else if (displayName.includes('فندق')) placeIcon = '🏨';
+                else if (displayName.includes('مطعم') || displayName.includes('مقهى') || displayName.includes('كافيه')) placeIcon = '🍴';
+                else if (displayName.includes('بنك') || displayName.includes('مصرف')) placeIcon = '🏦';
+                else if (displayName.includes('سوبرماركت') || displayName.includes('مول') || displayName.includes('سوق') || displayName.includes('ماركت')) placeIcon = '🛒';
+                else if (displayName.includes('مخبز') || displayName.includes('حلويات')) placeIcon = '🥖';
+                else if (displayName.includes('محمصة') || displayName.includes('بن')) placeIcon = '☕';
+                else if (displayName.includes('جامعة') || displayName.includes('كلية') || displayName.includes('مدرسة') || displayName.includes('تعليمي')) placeIcon = '🎓';
+                else if (displayName.includes('حي') || displayName.includes('منطقة') || displayName.includes('ضاحية')) placeIcon = '🏘️';
+                else placeIcon = '🏢';
+
+                const targetPopupContent = `
+                    <div style="font-family:'Tajawal',sans-serif; text-align:right; min-width:200px; padding:6px 4px;">
+                        <div style="display:flex; align-items:center; gap:5px; font-size:0.75rem; color:#059669; font-weight:800; margin-bottom:4px;">
+                            <span>${placeIcon}</span> <span>المكان المحدد</span>
+                        </div>
+                        <div style="font-size:0.95rem; font-weight:800; color:#0D2E58; margin-bottom:5px; line-height:1.35;">
+                            ${displayName}
+                        </div>
+                        ${targetLiwa ? `
+                            <div style="display:flex; align-items:center; gap:4px; font-size:0.75rem; color:#64748B; background:#F8FAFC; padding:3px 6px; border-radius:4px; border:1px solid #E2E8F0;">
+                                <span>🏛️</span> <span>التبعية الإدارية: <b>${targetLiwa}</b></span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+
                 originMarker = L.marker([placeLat, placeLon], {icon: originIcon, zIndexOffset: 1000}).addTo(stationMap)
-                    .bindPopup("<b>موقعك المستهدف</b>");
+                    .bindPopup(targetPopupContent);
                 markers.push(originMarker);
 
                 // Draw a pulsing target circle
@@ -4442,21 +4598,6 @@
                     st.marker = m;
                 });
             }
-
-            // تحديد اللواء التابع للنتيجة وتطبيق التظليل المناسب
-            const isInitialLoad = (!stations || stations.length === 0) && (placeLat === 31.95 && placeLon === 35.92);
-            let targetLiwa = null;
-            if (!isInitialLoad) {
-                if (placeLat && placeLon) {
-                    targetLiwa = getLiwaForCoords(placeLat, placeLon);
-                }
-                if (!targetLiwa && stations && stations.length > 0 && stations[0].mutasarrifiya) {
-                    targetLiwa = stations[0].mutasarrifiya;
-                }
-            }
-            
-            // تطبيق تظليل الألوية (إبقاء اللواء الناتج بدون تظليل وتظليل الباقي بألوان مختلفة)
-            updateLiwaShading(targetLiwa);
 
             // معاينة بيانات النتيجة في صندوق البطاقة على الخريطة
             if (!isInitialLoad && stations && stations.length > 0) {

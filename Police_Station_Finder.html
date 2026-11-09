@@ -1708,7 +1708,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.17</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.45.18</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -3693,6 +3693,32 @@
             return "";
         }
 
+        // إرجاع الحدود الجغرافية للواء محدد لتكبير الخريطة على حجم ذلك اللواء بدقة
+        function getLiwaBounds(targetLiwaName) {
+            if (!ammanLiwasGeoJSON || !ammanLiwasGeoJSON.features || !targetLiwaName || typeof L === 'undefined') return null;
+            const cleanTarget = normalizeArabic(targetLiwaName).replace(/لواء/g, '').trim();
+            for (let feat of ammanLiwasGeoJSON.features) {
+                const name = feat.properties.name || '';
+                const cleanName = normalizeArabic(name).replace(/لواء/g, '').trim();
+                if (cleanName === cleanTarget || cleanName.includes(cleanTarget) || cleanTarget.includes(cleanName)) {
+                    const b = L.geoJSON(feat).getBounds();
+                    // تقليص الامتداد الصحراوي الشاسع للجيزة والموقر للتركيز على النطاق المأهول
+                    if (name.includes('الجيزة')) {
+                        const sw = b.getSouthWest();
+                        const ne = b.getNorthEast();
+                        return L.latLngBounds([Math.max(31.55, sw.lat), sw.lng], [ne.lat, Math.min(36.35, ne.lng)]);
+                    }
+                    if (name.includes('الموقر')) {
+                        const sw = b.getSouthWest();
+                        const ne = b.getNorthEast();
+                        return L.latLngBounds(sw, [ne.lat, Math.min(36.35, ne.lng)]);
+                    }
+                    return b;
+                }
+            }
+            return null;
+        }
+
         var liwaLayerGroup = null;
 
         function updateLiwaShading(targetLiwaName) {
@@ -4412,10 +4438,11 @@
             const isInitialLoad = (!stations || stations.length === 0) && (placeLat === 31.95 && placeLon === 35.92);
             let targetLiwa = null;
             if (!isInitialLoad) {
-                if (stations && stations.length > 0 && stations[0].mutasarrifiya) {
-                    targetLiwa = stations[0].mutasarrifiya;
-                } else if (placeLat && placeLon) {
+                if (placeLat && placeLon) {
                     targetLiwa = getLiwaForCoords(placeLat, placeLon);
+                }
+                if (!targetLiwa && stations && stations.length > 0 && stations[0].mutasarrifiya) {
+                    targetLiwa = stations[0].mutasarrifiya;
                 }
             }
             
@@ -4432,21 +4459,27 @@
                 renderEstablishmentBranchMarkers(placeDisplayName, placeLat, placeLon);
             }
 
-            // ضبط وتكبير الخريطة بحيث تظهر الألوية جميعها مع إبراز الموقع والمركز الأمني
+            // ضبط وتكبير الخريطة على حجم اللواء التابع للنتيجة لعرض الموقع ضمن حدود اللواء
             if (!isInitialLoad && stationMap) {
-                // نطاق شامل يستوعب كافة ألوية محافظة العاصمة التسعة
-                const allLiwasEnvelope = L.latLngBounds([31.65, 35.68], [32.10, 36.25]);
-                if (placeLat && placeLon) {
-                    allLiwasEnvelope.extend([placeLat, placeLon]);
+                let liwaBounds = targetLiwa ? getLiwaBounds(targetLiwa) : null;
+                
+                if (liwaBounds && liwaBounds.isValid()) {
+                    // التأكد من شمول موقع البحث والمركز الأمني الأقرب داخل إطار الرؤية
+                    if (placeLat && placeLon) {
+                        liwaBounds.extend([placeLat, placeLon]);
+                    }
+                    if (stations && stations.length > 0) {
+                        liwaBounds.extend([stations[0].lat, stations[0].lon]);
+                    }
+                    stationMap.fitBounds(liwaBounds, {
+                        padding: [30, 30],
+                        maxZoom: 14,
+                        animate: true,
+                        duration: 1.2
+                    });
+                } else if (placeLat && placeLon) {
+                    stationMap.setView([placeLat, placeLon], 13);
                 }
-                if (stations && stations.length > 0) {
-                    stations.slice(0, 5).forEach(st => allLiwasEnvelope.extend([st.lat, st.lon]));
-                }
-                stationMap.fitBounds(allLiwasEnvelope, {
-                    padding: [25, 25],
-                    animate: true,
-                    duration: 1.2
-                });
 
                 if (originMarker) {
                     setTimeout(() => {

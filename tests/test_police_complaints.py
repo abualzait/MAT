@@ -595,6 +595,26 @@ class TestLlmEngine(unittest.TestCase):
         parsed4 = mat_llm_engine._parse_llm_json("This is not JSON at all")
         self.assertEqual(parsed4, {})
 
+    def test_extract_unparseable_llm_output_returns_manual_fallback(self):
+        conversational_refusal = "عذراً، لا يمكنني قراءة هذه الصورة بسبب عدم وضوح الخط."
+        fake_resp_body = json.dumps({
+            "candidates": [{"content": {"parts": [{"text": conversational_refusal}]}}]
+        }).encode("utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = fake_resp_body
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "fake-key", "api_base_url": "", "is_enabled": 1}
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            res = mat_llm_engine.extract_and_analyze_complaint(b"imagebytes", "image/png", settings)
+
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertEqual(res["raw_text"], conversational_refusal)
+        self.assertIn("could not be parsed as structured JSON", res["message"])
+        self.assertEqual(res["extracted"], {})
+        self.assertEqual(res["analysis"], {})
+
     def test_llm_connection_success_and_failure(self):
         mock_resp = mock.MagicMock()
         mock_resp.read.return_value = json.dumps({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}).encode("utf-8")

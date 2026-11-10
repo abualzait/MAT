@@ -524,6 +524,7 @@ def extract_and_analyze_complaint(
             "message": f"API key not configured for provider '{provider}'",
         }
 
+    raw_text = ""
     try:
         if provider == "gemini":
             raw_text = _call_gemini(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
@@ -543,6 +544,17 @@ def extract_and_analyze_complaint(
             }
 
         parsed = _parse_llm_json(raw_text)
+        if not parsed:
+            return {
+                "status": "manual_fallback",
+                "provider": provider,
+                "model": model,
+                "extracted": {},
+                "analysis": {},
+                "raw_text": raw_text,
+                "message": "LLM output could not be parsed as structured JSON",
+            }
+
         extracted, analysis = _normalize_complaint_result(parsed)
 
         return {
@@ -562,7 +574,7 @@ def extract_and_analyze_complaint(
             "model": model,
             "extracted": {},
             "analysis": {},
-            "raw_text": "",
+            "raw_text": raw_text,
             "message": f"Extraction error: {err_msg}",
         }
 

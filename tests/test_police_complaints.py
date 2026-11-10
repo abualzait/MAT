@@ -814,5 +814,358 @@ class TestComplaintsUtilities(unittest.TestCase):
         self.assertIn("مركز أمن تلاع العلي", xml_text)
 
 
+class TestComplaintsWorkflow(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "test_wf.db")
+        self.backup_path = os.path.join(self.tmpdir.name, "backup.json")
+        self.orig_db = server.DB_PATH
+        self.orig_backup = server.BACKUP_JSON_PATH
+        server.DB_PATH = self.db_path
+        server.BACKUP_JSON_PATH = self.backup_path
+        server.init_db()
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        conn = server.get_db()
+        self.officer = dict(conn.execute("SELECT id as user_id, name, username, role FROM mat_officers WHERE role='officer' LIMIT 1").fetchone())
+        self.admin = dict(conn.execute("SELECT id as user_id, name, username, role FROM mat_officers WHERE role='admin' LIMIT 1").fetchone())
+        self.governor = dict(conn.execute("SELECT id as user_id, name, username, role FROM mat_officers WHERE role='governor' LIMIT 1").fetchone())
+        self.caller = dict(conn.execute("SELECT id as user_id, name, username, role FROM mat_officers WHERE role='caller' LIMIT 1").fetchone())
+        conn.close()
+
+    def tearDown(self):
+        server.DB_PATH = self.orig_db
+        server.BACKUP_JSON_PATH = self.orig_backup
+        self.tmpdir.cleanup()
+
+    def test_full_workflow_officer_action_section_head_governor_modify_to_phone_call(self):
+        conn = server.get_db()
+        try:
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "paper_date": "2026-11-10",
+                "subject": "مشكلة مواقف سيارات",
+                "summary": "شكوى خفيفة حول الوقوف المتكرر أمام المحل.",
+                "complainant_category": "مؤسسة تجارية",
+                "respondent_category": "مواطن",
+                "submit_stage": "draft_scan",
+                "parties": [
+                    {"party_type": "شاكي", "party_category": "مؤسسة تجارية", "name": "شركة النور", "phone": "0791112222", "address": "الشميساني"},
+                    {"party_type": "مشتكى_عليه", "party_category": "مواطن", "name": "سامي عمر", "phone": "0793334444", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            cid = created["id"]
+            self.assertIn("تلاع العلي", created["nearest_station"])
+            self.assertTrue(created["complaint_number"].startswith("PC-"))
+            self.assertEqual(len(created["parties"]), 2)
+
+            # Officer reviews complaint, takes action & writes notes before sending to Section Head
+            off_res = mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                "officer_action": "توديع عن طريق مركز أمني",
+                "officer_notes": "تمت معاينة المرفق والتحقق من عنوان المشتكى عليه في تلاع العلي.",
+                "send_to_section_head": True
+            })
+            self.assertEqual(off_res["workflow_stage"], "pending_section_head")
+
+            # Officer cannot issue governor decision
+            with self.assertRaises(PermissionError):
+                mat_complaints_service.record_governor_decision(conn, self.officer, cid, {"decision": "موافقة"})
+
+            # Section head writes مشروحات القسم & recommends action
+            sec_res = mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "ينسب بالتوديع عن طريق مركز أمن تلاع العلي.",
+                "section_recommended_action": "توديع عن طريق مركز أمني",
+                "nearest_station": "مركز أمن تلاع العلي"
+            })
+            self.assertEqual(sec_res["workflow_stage"], "pending_governor")
+
+            # Governor modifies recommended action to اتصال هاتفي -> auto-creates appointment!
+            gov_res = mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                "decision": "تغيير_الإجراء",
+                "governor_final_action": "اتصال هاتفي",
+                "governor_notes": "يتم استدعاء الأطراف هاتفياً للصلح أولاً."
+            })
+            self.assertEqual(gov_res["workflow_stage"], "governor_modified")
+            self.assertIsNotNone(gov_res["linked_appointment_id"])
+            self.assertIsNotNone(gov_res["linked_appointment"])
+
+            appt = conn.execute("SELECT * FROM mat_simple_appointments WHERE id = ?", (gov_res["linked_appointment_id"],)).fetchone()
+            self.assertIsNotNone(appt)
+            self.assertEqual(appt["case_number"], created["complaint_number"])
+            self.assertEqual(appt["visitor_name"], "سامي عمر")
+
+            # Re-invoking governor approval does not create duplicate appointment
+            gov_res_repeat = mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                "decision": "تغيير_الإجراء",
+                "governor_final_action": "اتصال هاتفي",
+                "governor_notes": "تأكيد الاتصال الهاتفي."
+            })
+            self.assertEqual(gov_res_repeat["linked_appointment_id"], gov_res["linked_appointment_id"])
+            appt_count = conn.execute(
+                "SELECT COUNT(*) FROM mat_simple_appointments WHERE case_number = ?",
+                (created["complaint_number"],)
+            ).fetchone()[0]
+            self.assertEqual(appt_count, 1)
+
+            # Officer performs post-approval execution action and notes
+            exec_res = mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                "officer_action": "اتصال هاتفي",
+                "officer_notes": "تم الاتصال بالطرفين وتحديد موعد المراجعة.",
+                "execution_status": "completed"
+            })
+            self.assertEqual(exec_res["workflow_stage"], "completed")
+            self.assertGreaterEqual(len(exec_res["workflow_log"]), 4)
+        finally:
+            conn.close()
+
+    def test_governor_approval_station_referral_reserves_file(self):
+        conn = server.get_db()
+        try:
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "إزعاج من منشأة تجارية",
+                "summary": "ضجيج ليلي متكرر",
+                "submit_stage": "pending_section_head",
+                "parties": [
+                    {"party_type": "شاكي", "name": "علي حسن", "phone": "0790001111", "address": "عبدون"},
+                    {"party_type": "مشتكى_عليه", "name": "مقهى الربيع", "phone": "0790002222", "address": "البيادر"}
+                ]
+            }, self.base_dir)
+            cid = created["id"]
+            mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "يرجى التوديع لمركز أمن البيادر",
+                "section_recommended_action": "توديع عن طريق مركز أمني",
+                "nearest_station": "مركز أمن البيادر"
+            })
+            gov_res = mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                "decision": "موافقة",
+                "governor_notes": "موافق"
+            })
+            self.assertEqual(gov_res["workflow_stage"], "governor_approved")
+            self.assertEqual(gov_res["linked_file_number"], created["complaint_number"])
+            self.assertIsNotNone(gov_res["linked_file"])
+            res_file = conn.execute("SELECT * FROM mat_reserved_files WHERE file_number = ?", (created["complaint_number"],)).fetchone()
+            self.assertIsNotNone(res_file)
+            custody_log = conn.execute(
+                "SELECT * FROM mat_file_custody_log WHERE reserved_file_id = ?",
+                (res_file["id"],)
+            ).fetchone()
+            self.assertIsNotNone(custody_log)
+            self.assertEqual(custody_log["status"], "accepted")
+        finally:
+            conn.close()
+
+    def test_rbac_validation_and_invalid_stage_transitions(self):
+        conn = server.get_db()
+        try:
+            # Caller cannot create complaint intake
+            with self.assertRaises(PermissionError):
+                mat_complaints_service.create_complaint_intake(conn, self.caller, {
+                    "subject": "محاولة غير مصرح بها"
+                }, self.base_dir)
+
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "اختبار صلاحيات ومراحل",
+                "summary": "تفاصيل الاختبار",
+                "submit_stage": "draft_scan"
+            }, self.base_dir)
+            cid = created["id"]
+
+            # Blank officer notes or action rejected
+            with self.assertRaises(ValueError):
+                mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                    "officer_action": "اتصال هاتفي",
+                    "officer_notes": "   "
+                })
+            with self.assertRaises(ValueError):
+                mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                    "officer_action": "",
+                    "officer_notes": "ملاحظة"
+                })
+
+            # Officer cannot recommend as section head
+            with self.assertRaises(PermissionError):
+                mat_complaints_service.record_section_head_recommendation(conn, self.officer, cid, {
+                    "section_head_notes": "مشروحات",
+                    "section_recommended_action": "اتصال هاتفي"
+                })
+
+            # Advance to pending_governor
+            mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "يرفع للحاكم الإداري",
+                "section_recommended_action": "توديع مغفور"
+            })
+
+            # Officer cannot act while pending_governor
+            with self.assertRaises(ValueError):
+                mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                    "officer_action": "اتصال هاتفي",
+                    "officer_notes": "محاولة تعديل أثناء انتظار القرار"
+                })
+
+            # Admin cannot issue governor decision
+            with self.assertRaises(PermissionError):
+                mat_complaints_service.record_governor_decision(conn, self.admin, cid, {"decision": "موافقة"})
+
+            # Missing governor_final_action when تغيير_الإجراء
+            with self.assertRaises(ValueError):
+                mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                    "decision": "تغيير_الإجراء",
+                    "governor_final_action": ""
+                })
+
+            # Missing complaint raises LookupError
+            with self.assertRaises(LookupError):
+                mat_complaints_service.record_officer_action(conn, self.officer, 999999, {
+                    "officer_action": "اتصال هاتفي",
+                    "officer_notes": "ملاحظة"
+                })
+            self.assertIsNone(mat_complaints_service.get_complaint_detail(conn, 999999))
+        finally:
+            conn.close()
+
+    def test_governor_reject_resubmit_and_urgent_tawdi_maghfour_with_preexisting_file(self):
+        conn = server.get_db()
+        try:
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "complaint_number": "PC-20261110-7777",
+                "subject": "مشاجرة متكررة",
+                "summary": "تهديد مباشر يتطلب توديع مغفور",
+                "submit_stage": "pending_section_head"
+            }, self.base_dir)
+            cid = created["id"]
+
+            # Pre-reserve file manually to verify idempotent handling without IntegrityError crash
+            conn.execute(
+                "INSERT INTO mat_reserved_files (file_number, officer_id, notes) VALUES (?, ?, ?)",
+                ("PC-20261110-7777", self.officer["user_id"], "حجز مسبق")
+            )
+            conn.commit()
+
+            mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "مقترح حفظ مبدئياً",
+                "section_recommended_action": "حفظ / توجيه للقضاء المختص"
+            })
+
+            # Governor rejects
+            rej = mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                "decision": "رفض",
+                "governor_notes": "يعاد للدراسة والتوديع المغفور"
+            })
+            self.assertEqual(rej["workflow_stage"], "governor_rejected")
+            self.assertIsNone(rej["linked_appointment_id"])
+
+            # Officer re-evaluates rejected complaint and sends back to section head
+            re_off = mat_complaints_service.record_officer_action(conn, self.officer, cid, {
+                "officer_action": "توديع مغفور",
+                "officer_notes": "تمت إعادة الدراسة والتوصية بالتوديع المغفور",
+                "send_to_section_head": True
+            })
+            self.assertEqual(re_off["workflow_stage"], "pending_section_head")
+
+            mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "ينسب بالتوديع المغفور",
+                "section_recommended_action": "توديع مغفور"
+            })
+            app_res = mat_complaints_service.record_governor_decision(conn, self.governor, cid, {
+                "decision": "موافقة",
+                "governor_notes": "موافق على التوديع المغفور"
+            })
+            self.assertEqual(app_res["workflow_stage"], "governor_approved")
+            self.assertEqual(app_res["priority"], "عاجل")
+            self.assertEqual(app_res["linked_file_number"], "PC-20261110-7777")
+        finally:
+            conn.close()
+
+    def test_scan_linking_followup_90_days_update_list_and_docx_export(self):
+        conn = server.get_db()
+        try:
+            # Insert an unlinked scan and an already-linked scan
+            c1 = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "شكوى أولى",
+                "summary": "ملخص أول",
+                "submit_stage": "draft_scan"
+            }, self.base_dir)
+            cur = conn.execute(
+                """
+                INSERT INTO mat_complaint_scans (complaint_id, stored_filename, original_filename, mime_type, file_size, uploaded_by_id)
+                VALUES (NULL, 'scan_free.png', 'free.png', 'image/png', 512, ?)
+                """,
+                (self.officer["user_id"],)
+            )
+            free_scan_id = cur.lastrowid
+            cur2 = conn.execute(
+                """
+                INSERT INTO mat_complaint_scans (complaint_id, stored_filename, original_filename, mime_type, file_size, uploaded_by_id)
+                VALUES (?, 'scan_taken.png', 'taken.png', 'image/png', 512, ?)
+                """,
+                (c1["id"], self.officer["user_id"])
+            )
+            taken_scan_id = cur2.lastrowid
+            conn.commit()
+
+            c2 = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "شكوى تعدي على رصيف",
+                "summary": "تفاصيل الشكوى الثانية",
+                "scan_ids": [free_scan_id, taken_scan_id],
+                "parties": [
+                    {"party_type": "شاكي", "name": "خالد سليم", "phone": "0795550000", "address": "صويلح"},
+                    {"party_type": "مشتكى_عليه", "name": "متجر السعادة", "phone": "0796660000", "address": "الشميساني"}
+                ]
+            }, self.base_dir)
+            # Only free scan should be linked to c2; taken scan stays on c1
+            self.assertEqual([s["id"] for s in c2["scans"]], [free_scan_id])
+            c1_detail = mat_complaints_service.get_complaint_detail(conn, c1["id"])
+            self.assertEqual([s["id"] for s in c1_detail["scans"]], [taken_scan_id])
+
+            # Update complaint details & rematch station
+            updated = mat_complaints_service.update_complaint_details(conn, self.officer, c2["id"], {
+                "subject": "شكوى تعدي وإغلاق مدخل",
+                "rematch_station": True,
+                "parties": [
+                    {"party_type": "شاكي", "name": "خالد سليم", "phone": "0795550000", "address": "صويلح"},
+                    {"party_type": "مشتكى_عليه", "name": "متجر السعادة", "phone": "0796660000", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            self.assertEqual(updated["subject"], "شكوى تعدي وإغلاق مدخل")
+            self.assertIn("تلاع العلي", updated["nearest_station"])
+
+            # Direct DOCX export from get_complaint_detail result
+            template = os.path.join(self.base_dir, "complaint_form_editable.docx")
+            docx_bytes = mat_complaints_service.export_complaint_docx(updated, template)
+            with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+                xml_text = zf.read("word/document.xml").decode("utf-8")
+            self.assertIn("شكوى تعدي وإغلاق مدخل", xml_text)
+            self.assertIn("متجر السعادة", xml_text)
+
+            # Stop 90 days rejected before 90 days for officer
+            with self.assertRaises(ValueError):
+                mat_complaints_service.register_followup(conn, self.officer, c2["id"], "stop_90_days", "")
+
+            # Backdate c1 by 95 days -> appears in overdue_90 filter & can be stopped
+            old_ts = (datetime.now() - timedelta(days=95)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("UPDATE mat_complaints SET last_followup_at = ? WHERE id = ?", (old_ts, c1["id"]))
+            conn.commit()
+
+            listed_overdue = mat_complaints_service.list_complaints(conn, self.officer, {"overdue_90": True})
+            self.assertEqual([item["id"] for item in listed_overdue["complaints"]], [c1["id"]])
+            self.assertEqual(listed_overdue["stats"]["overdue_90"], 1)
+
+            stopped = mat_complaints_service.register_followup(conn, self.officer, c1["id"], "stop_90_days", "مرور 95 يوماً")
+            self.assertEqual(stopped["workflow_stage"], "stopped_90_days")
+            self.assertEqual(stopped["ninety_day_status"]["warning_level"], "closed")
+
+            # Follow-up resets timer on c2
+            conn.execute("UPDATE mat_complaints SET last_followup_at = ? WHERE id = ?", (old_ts, c2["id"]))
+            conn.commit()
+            followed = mat_complaints_service.register_followup(conn, self.officer, c2["id"], "followup", "راجع الشاكي القسم")
+            self.assertEqual(followed["ninety_day_status"]["warning_level"], "normal")
+            self.assertFalse(followed["ninety_day_status"]["is_due_for_stop"])
+
+            # Search filter by party name
+            search_res = mat_complaints_service.list_complaints(conn, self.admin, {"q": "متجر السعادة"})
+            self.assertEqual(len(search_res["complaints"]), 1)
+            self.assertEqual(search_res["complaints"][0]["id"], c2["id"])
+        finally:
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

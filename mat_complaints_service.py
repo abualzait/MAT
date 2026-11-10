@@ -12,17 +12,76 @@ import io
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import textwrap
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 # ── CONFIGURATION & CONSTANTS ────────────────────────────────────────────────
 
 MAX_SCAN_SIZE = 10 * 1024 * 1024  # 10 MB
+
+INTAKE_ALLOWED_STAGES = ("draft_scan", "officer_reviewed", "pending_section_head")
+PRE_APPROVAL_STAGES = ("draft_scan", "officer_reviewed", "governor_rejected")
+POST_APPROVAL_STAGES = ("governor_approved", "governor_modified", "in_execution")
+SECTION_HEAD_ALLOWED_STAGES = (
+    "draft_scan",
+    "officer_reviewed",
+    "pending_section_head",
+    "governor_rejected",
+    "pending_governor",
+)
+GOVERNOR_ALLOWED_STAGES = (
+    "pending_governor",
+    "governor_approved",
+    "governor_modified",
+    "governor_rejected",
+)
+GOVERNOR_DECISIONS = ("موافقة", "رفض", "تغيير_الإجراء")
+
+STAGE_TO_STATUS = {
+    "draft_scan": "جديد",
+    "officer_reviewed": "قيد المراجعة",
+    "pending_section_head": "بانتظار رئيس القسم",
+    "pending_governor": "بانتظار الحاكم الإداري",
+    "governor_approved": "معتمدة",
+    "governor_modified": "معتمدة (معدلة)",
+    "governor_rejected": "مرفوضة",
+    "in_execution": "قيد التنفيذ",
+    "completed": "منجزة",
+    "stopped_90_days": "كف طلب (90 يوماً)",
+}
+
+UPDATABLE_COMPLAINT_FIELDS = (
+    "paper_date",
+    "subject",
+    "summary",
+    "complaint_type",
+    "priority",
+    "notes",
+    "complainant_category",
+    "respondent_category",
+    "has_signature",
+    "no_pending_lawsuit_declared",
+    "is_minor_police_complaint",
+    "assigned_officer_id",
+    "nearest_station",
+    "police_directorate",
+    "liwa_name",
+    "station_lat",
+    "station_lon",
+    "ai_provider",
+    "ai_model",
+    "ai_extracted_json",
+    "ai_analysis",
+    "ai_solution_recommendation",
+    "ai_recommended_action",
+    "ai_confidence",
+)
 
 ALLOWED_MAGIC = [
     (b"\xff\xd8\xff", "image/jpeg", ".jpg"),
@@ -292,7 +351,14 @@ def compute_90_day_status(last_followup_at: str, workflow_stage: str) -> dict:
     Supports ISO 8601 timestamps (including 'Z' and timezone offsets) and standard SQLite dates.
     Returns: days_elapsed, days_remaining, is_due_for_stop, warning_level
     """
-    is_closed = str(workflow_stage or "").lower() in ("closed", "stopped", "archived", "governor_rejected")
+    is_closed = str(workflow_stage or "").lower() in (
+        "closed",
+        "stopped",
+        "archived",
+        "governor_rejected",
+        "stopped_90_days",
+        "completed",
+    )
 
     dt = None
     if last_followup_at:
@@ -418,7 +484,14 @@ def export_complaint_docx(complaint_detail: dict, template_path: str) -> bytes:
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"ملف نموذج الشكوى غير موجود: {template_path}")
 
-    complaint = complaint_detail.get("complaint") or {}
+    if not isinstance(complaint_detail, dict):
+        raise ValueError("بيانات الشكوى غير صالحة")
+
+    complaint = (
+        complaint_detail.get("complaint")
+        if isinstance(complaint_detail.get("complaint"), dict)
+        else complaint_detail
+    )
     parties = complaint_detail.get("parties") or []
 
     # Register XML namespaces so Word understands all tags properly
@@ -575,3 +648,1339 @@ def export_complaint_docx(complaint_detail: dict, template_path: str) -> bytes:
 
     in_zip.close()
     return out_io.getvalue()
+
+
+# ── WORKFLOW HELPERS & RBAC ──────────────────────────────────────────────────
+
+def _now_str() -> str:
+    """Return current local timestamp string formatted consistently with SQLite localtime."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _require_roles(user: dict, allowed_roles: tuple[str, ...]) -> tuple[int, str]:
+    """Validate authenticated user dict and enforce role-based access control."""
+    if not user or not isinstance(user, dict):
+        raise PermissionError("المصادقة مطلوبة")
+    actor_id = user.get("user_id") or user.get("id")
+    if not actor_id:
+        raise PermissionError("معرف المستخدم مفقود")
+    try:
+        actor_int = int(actor_id)
+    except (ValueError, TypeError) as exc:
+        raise PermissionError("معرف المستخدم غير صالح") from exc
+    role = str(user.get("role") or "").strip()
+    if role not in allowed_roles:
+        raise PermissionError(f"غير مصرح للدور '{role}' بتنفيذ هذا الإجراء")
+    return actor_int, role
+
+
+def _clean_opt_int(value, field_name: str = "value"):
+    """Parse optional integer identifier safely; return None for blank values."""
+    if value is None or value == "":
+        return None
+    try:
+        iv = int(value)
+        return iv if iv > 0 else None
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"قيمة غير صالحة للحقل {field_name}") from exc
+
+
+def _clean_opt_float(value, field_name: str = "value"):
+    """Parse optional float coordinate safely; return None for blank values."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"قيمة رقمية غير صالحة للحقل {field_name}") from exc
+
+
+def _is_truthy(val) -> bool:
+    """Interpret boolean flags from JSON payloads or query parameters."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return val != 0
+    return str(val or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _get_complaint_or_raise(conn, complaint_id: int) -> dict:
+    """Fetch raw complaint row by ID or raise LookupError."""
+    cid = _clean_opt_int(complaint_id, "complaint_id")
+    if cid is None:
+        raise LookupError("رقم الشكوى غير صالح")
+    row = conn.execute("SELECT * FROM mat_complaints WHERE id = ?", (cid,)).fetchone()
+    if row is None:
+        raise LookupError(f"الشكوى غير موجودة (#{cid})")
+    return dict(row)
+
+
+def _log_workflow_and_activity(
+    conn,
+    complaint_id: int,
+    actor_id: int,
+    actor_role: str,
+    stage_from: str,
+    stage_to: str,
+    action_taken: str,
+    notes: str = "",
+    activity_action: str = None,
+    activity_details: str = None,
+) -> None:
+    """Record workflow audit trail in mat_complaint_workflow_log and mat_activity_log."""
+    conn.execute(
+        """
+        INSERT INTO mat_complaint_workflow_log
+            (complaint_id, actor_id, actor_role, stage_from, stage_to, action_taken, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(complaint_id),
+            int(actor_id),
+            str(actor_role or ""),
+            stage_from,
+            stage_to,
+            str(action_taken or "").strip(),
+            str(notes or "").strip(),
+            _now_str(),
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO mat_activity_log (user_id, action, entity_type, entity_id, details)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            int(actor_id),
+            activity_action or str(action_taken or "").strip(),
+            "police_complaint",
+            int(complaint_id),
+            activity_details if activity_details is not None else str(notes or "").strip(),
+        ),
+    )
+
+
+def _normalize_parties(payload: dict) -> list[dict]:
+    """Normalize parties from payload['parties'] or separate complainants/respondents lists."""
+    raw_parties = payload.get("parties")
+    combined = []
+    if isinstance(raw_parties, list):
+        combined = list(raw_parties)
+    else:
+        for comp in payload.get("complainants") or []:
+            if isinstance(comp, dict):
+                item = dict(comp)
+                item.setdefault("party_type", "شاكي")
+                combined.append(item)
+        for resp in payload.get("respondents") or []:
+            if isinstance(resp, dict):
+                item = dict(resp)
+                item.setdefault("party_type", "مشتكى_عليه")
+                combined.append(item)
+
+    normalized = []
+    for p in combined:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "").strip()
+        if not name:
+            continue
+        party_type = str(p.get("party_type") or "شاكي").strip()
+        if party_type not in ("شاكي", "مشتكى_عليه"):
+            raise ValueError(f"نوع الطرف غير صالح: {party_type}")
+        party_category = str(p.get("party_category") or "مواطن").strip() or "مواطن"
+        normalized.append(
+            {
+                "party_type": party_type,
+                "party_category": party_category,
+                "name": name,
+                "phone": str(p.get("phone") or "").strip(),
+                "national_id": str(p.get("national_id") or "").strip(),
+                "address": str(p.get("address") or "").strip(),
+                "notes": str(p.get("notes") or "").strip(),
+            }
+        )
+    return normalized
+
+
+def _insert_parties(conn, complaint_id: int, parties: list[dict]) -> None:
+    """Persist normalized parties for a complaint."""
+    for party in parties:
+        conn.execute(
+            """
+            INSERT INTO mat_parties
+                (complaint_id, party_type, party_category, name, phone, national_id, address, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(complaint_id),
+                party["party_type"],
+                party["party_category"],
+                party["name"],
+                party["phone"],
+                party["national_id"],
+                party["address"],
+                party["notes"],
+            ),
+        )
+
+
+def _link_scan_ids(conn, complaint_id: int, scan_ids) -> None:
+    """Safely attach unowned scan records to a complaint without hijacking scans owned elsewhere."""
+    if not scan_ids or not isinstance(scan_ids, (list, tuple)):
+        return
+    for raw_sid in scan_ids:
+        sid = _clean_opt_int(raw_sid, "scan_id")
+        if sid is None:
+            continue
+        conn.execute(
+            """
+            UPDATE mat_complaint_scans
+            SET complaint_id = ?
+            WHERE id = ? AND (complaint_id IS NULL OR complaint_id = ?)
+            """,
+            (int(complaint_id), sid, int(complaint_id)),
+        )
+
+
+def _first_respondent_address(payload: dict, parties: list[dict]) -> str:
+    """Pick first non-empty respondent address or explicit payload respondent_address."""
+    for p in parties:
+        if p.get("party_type") == "مشتكى_عليه" and p.get("address"):
+            return str(p["address"]).strip()
+    return str(payload.get("respondent_address") or "").strip()
+
+
+def _resolve_station_fields(
+    payload: dict,
+    parties: list[dict],
+    base_dir: str,
+    existing: dict = None,
+) -> dict:
+    """Resolve nearest police station fields from explicit payload or respondent address GIS match."""
+    existing = existing or {}
+    explicit_station = str(payload.get("nearest_station") or "").strip()
+    explicit_dir = str(payload.get("police_directorate") or "").strip()
+    explicit_liwa = str(payload.get("liwa_name") or "").strip()
+    explicit_lat = _clean_opt_float(payload.get("station_lat"), "station_lat") if "station_lat" in payload else None
+    explicit_lon = _clean_opt_float(payload.get("station_lon"), "station_lon") if "station_lon" in payload else None
+
+    rematch = _is_truthy(payload.get("rematch_station"))
+    current_station = explicit_station or ("" if rematch else str(existing.get("nearest_station") or "").strip())
+
+    matched = {}
+    if not explicit_station and (not current_station or rematch):
+        resp_addr = _first_respondent_address(payload, parties)
+        if resp_addr and base_dir:
+            res = match_nearest_police_station(resp_addr, base_dir)
+            if res.get("matched"):
+                matched = res
+
+    nearest_station = explicit_station or matched.get("nearest_station") or current_station
+    police_directorate = (
+        explicit_dir
+        or matched.get("police_directorate")
+        or ("" if rematch and matched else str(existing.get("police_directorate") or "").strip())
+    )
+    liwa_name = (
+        explicit_liwa
+        or matched.get("liwa_name")
+        or ("" if rematch and matched else str(existing.get("liwa_name") or "").strip())
+    )
+    station_lat = explicit_lat if explicit_lat is not None else (
+        matched.get("lat") if matched else existing.get("station_lat")
+    )
+    station_lon = explicit_lon if explicit_lon is not None else (
+        matched.get("lon") if matched else existing.get("station_lon")
+    )
+
+    return {
+        "nearest_station": nearest_station,
+        "police_directorate": police_directorate,
+        "liwa_name": liwa_name,
+        "station_lat": station_lat,
+        "station_lon": station_lon,
+    }
+
+
+def _generate_unique_complaint_number(conn) -> str:
+    """Generate a collision-free complaint number in PC-YYYYMMDD-NNNN format."""
+    today_tag = datetime.now().strftime("%Y%m%d")
+    prefix = f"PC-{today_tag}-"
+    rows = conn.execute(
+        "SELECT complaint_number FROM mat_complaints WHERE complaint_number LIKE ?",
+        (f"{prefix}%",),
+    ).fetchall()
+    max_seq = 0
+    for row in rows:
+        cn = row["complaint_number"] if hasattr(row, "keys") else row[0]
+        if cn and cn.startswith(prefix):
+            tail = cn[len(prefix):]
+            if tail.isdigit():
+                max_seq = max(max_seq, int(tail))
+    seq = max_seq + 1
+    while True:
+        candidate = f"{prefix}{seq:04d}"
+        exists = conn.execute(
+            "SELECT 1 FROM mat_complaints WHERE complaint_number = ?",
+            (candidate,),
+        ).fetchone()
+        if not exists:
+            return candidate
+        seq += 1
+
+
+# ── AUTOMATED MAT TOOLKIT INTEGRATIONS ───────────────────────────────────────
+
+def _auto_create_phone_appointment(conn, complaint: dict, parties: list[dict], actor_id: int) -> int:
+    """Create a mat_simple_appointments entry for 'اتصال هاتفي' if not already linked."""
+    existing_appt_id = complaint.get("linked_appointment_id")
+    if existing_appt_id:
+        existing_row = conn.execute(
+            "SELECT id FROM mat_simple_appointments WHERE id = ?",
+            (int(existing_appt_id),),
+        ).fetchone()
+        if existing_row:
+            return int(existing_row["id"])
+
+    respondents = [p for p in parties if p.get("party_type") == "مشتكى_عليه"]
+    complainants = [p for p in parties if p.get("party_type") == "شاكي"]
+    primary_party = respondents[0] if respondents else (complainants[0] if complainants else None)
+
+    case_number = (complaint.get("complaint_number") or f"PC-{complaint['id']}").strip()
+    if primary_party:
+        visitor_name = (primary_party.get("name") or "").strip() or complaint.get("subject") or case_number
+        phone = (primary_party.get("phone") or "").strip()
+        national_id = (primary_party.get("national_id") or "").strip()
+    else:
+        visitor_name = (complaint.get("subject") or "").strip() or case_number
+        phone = ""
+        national_id = ""
+
+    now_dt = datetime.now()
+    appt_dt = now_dt + timedelta(days=1) if now_dt.hour >= 15 else now_dt
+    appointment_date = appt_dt.strftime("%Y-%m-%d")
+    appointment_time = "10:00"
+    station_name = (complaint.get("nearest_station") or "").strip() or "قسم الشكاوي"
+
+    note_parts = [f"شكوى أمنية ({case_number}): {complaint.get('subject') or ''}"]
+    if complaint.get("governor_decision"):
+        note_parts.append(f"قرار الحاكم الإداري: {complaint['governor_decision']}")
+    if complaint.get("governor_notes"):
+        note_parts.append(str(complaint["governor_notes"]).strip())
+    notes = " | ".join(p for p in note_parts if p)
+
+    requested_by_id = (
+        complaint.get("section_head_id")
+        or complaint.get("assigned_officer_id")
+        or complaint.get("created_by_id")
+        or actor_id
+    )
+
+    cur = conn.execute(
+        """
+        INSERT INTO mat_simple_appointments (
+            case_number, visitor_name, phone, national_id, station_name,
+            appointment_date, appointment_time, status, notes, created_by_id,
+            requested_by_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'مُجدول', ?, ?, ?)
+        """,
+        (
+            case_number,
+            visitor_name,
+            phone,
+            national_id,
+            station_name,
+            appointment_date,
+            appointment_time,
+            notes,
+            int(actor_id),
+            int(requested_by_id),
+        ),
+    )
+    appt_id = int(cur.lastrowid)
+
+    conn.execute(
+        "UPDATE mat_complaints SET linked_appointment_id = ?, updated_at = ? WHERE id = ?",
+        (appt_id, _now_str(), int(complaint["id"])),
+    )
+    conn.execute(
+        """
+        INSERT INTO mat_activity_log (user_id, action, entity_type, entity_id, details)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            int(actor_id),
+            "إنشاء موعد اتصال هاتفي تلقائي",
+            "simple_appointment",
+            appt_id,
+            f"تم جدولة اتصال تلقائي للشكوى {case_number} بتاريخ {appointment_date}",
+        ),
+    )
+    return appt_id
+
+
+def _auto_reserve_complaint_file(conn, complaint: dict, actor_id: int) -> str:
+    """Reserve complaint_number in mat_reserved_files and record initial custody log idempotently."""
+    file_number = (complaint.get("complaint_number") or f"PC-{complaint['id']}").strip()
+    target_officer_id = int(
+        complaint.get("assigned_officer_id")
+        or complaint.get("section_head_id")
+        or complaint.get("created_by_id")
+        or actor_id
+    )
+
+    existing_res = conn.execute(
+        "SELECT id FROM mat_reserved_files WHERE file_number = ?",
+        (file_number,),
+    ).fetchone()
+
+    created_new = False
+    if existing_res is None:
+        station_info = (complaint.get("nearest_station") or "").strip()
+        note_text = f"حجز تلقائي لشكوى: {complaint.get('subject') or ''}".strip()
+        if station_info:
+            note_text += f" ({station_info})"
+        try:
+            cur = conn.execute(
+                "INSERT INTO mat_reserved_files (file_number, officer_id, notes) VALUES (?, ?, ?)",
+                (file_number, target_officer_id, note_text),
+            )
+            res_id = int(cur.lastrowid)
+            conn.execute(
+                """
+                INSERT INTO mat_file_custody_log (reserved_file_id, to_officer_id, status, notes)
+                VALUES (?, ?, 'accepted', ?)
+                """,
+                (res_id, target_officer_id, "تسجيل أولي تلقائي بعد قرار الحاكم الإداري"),
+            )
+            created_new = True
+        except sqlite3.IntegrityError:
+            existing_res = conn.execute(
+                "SELECT id FROM mat_reserved_files WHERE file_number = ?",
+                (file_number,),
+            ).fetchone()
+
+    conn.execute(
+        "UPDATE mat_complaints SET linked_file_number = ?, updated_at = ? WHERE id = ?",
+        (file_number, _now_str(), int(complaint["id"])),
+    )
+    if created_new:
+        conn.execute(
+            """
+            INSERT INTO mat_activity_log (user_id, action, entity_type, entity_id, details)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(actor_id),
+                "حجز ملف شكوى تلقائي",
+                "police_complaint",
+                int(complaint["id"]),
+                f"تم حجز الملف رقم {file_number} تلقائياً للضابط #{target_officer_id}",
+            ),
+        )
+    return file_number
+
+
+def _ensure_officer_exists(conn, officer_id: int) -> None:
+    """Verify an explicit officer ID exists in mat_officers."""
+    row = conn.execute("SELECT id FROM mat_officers WHERE id = ?", (int(officer_id),)).fetchone()
+    if row is None:
+        raise ValueError(f"الضابط المحدد غير موجود (#{officer_id})")
+
+
+def _extract_station_overrides(payload: dict, existing: dict) -> dict:
+    """Extract optional police station override fields, preserving existing values when omitted."""
+    return {
+        "nearest_station": str(payload.get("nearest_station") or "").strip()
+        or (existing.get("nearest_station") or ""),
+        "police_directorate": str(payload.get("police_directorate") or "").strip()
+        or (existing.get("police_directorate") or ""),
+        "liwa_name": str(payload.get("liwa_name") or "").strip()
+        or (existing.get("liwa_name") or ""),
+        "station_lat": (
+            _clean_opt_float(payload.get("station_lat"), "station_lat")
+            if payload.get("station_lat") not in (None, "")
+            else existing.get("station_lat")
+        ),
+        "station_lon": (
+            _clean_opt_float(payload.get("station_lon"), "station_lon")
+            if payload.get("station_lon") not in (None, "")
+            else existing.get("station_lon")
+        ),
+    }
+
+
+def _apply_post_approval_integrations(conn, complaint_id: int, final_action: str, actor_id: int) -> None:
+    """Execute automated MAT integrations based on the governor's approved final action."""
+    complaint = _get_complaint_or_raise(conn, complaint_id)
+    parties = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT * FROM mat_parties WHERE complaint_id = ? ORDER BY id ASC",
+            (int(complaint_id),),
+        ).fetchall()
+    ]
+    action_clean = str(final_action or "").strip()
+    if action_clean == "اتصال هاتفي":
+        _auto_create_phone_appointment(conn, complaint, parties, actor_id)
+    elif action_clean in ("توديع عن طريق مركز أمني", "توديع مغفور"):
+        _auto_reserve_complaint_file(conn, complaint, actor_id)
+        if action_clean == "توديع مغفور":
+            conn.execute(
+                "UPDATE mat_complaints SET priority = 'عاجل', updated_at = ? WHERE id = ?",
+                (_now_str(), int(complaint_id)),
+            )
+
+
+# ── PUBLIC WORKFLOW SERVICE FUNCTIONS ────────────────────────────────────────
+
+def get_complaint_detail(conn, complaint_id: int) -> dict | None:
+    """Return full complaint record with attached parties, scans, workflow log, 90-day status, and linked tools."""
+    cid = _clean_opt_int(complaint_id, "complaint_id")
+    if cid is None:
+        return None
+
+    row = conn.execute(
+        """
+        SELECT c.*,
+               o_assigned.name AS assigned_officer_name,
+               o_created.name AS created_by_name,
+               o_off.name AS officer_reviewed_by_name,
+               o_sec.name AS section_head_name,
+               o_gov.name AS governor_name
+        FROM mat_complaints c
+        LEFT JOIN mat_officers o_assigned ON c.assigned_officer_id = o_assigned.id
+        LEFT JOIN mat_officers o_created ON c.created_by_id = o_created.id
+        LEFT JOIN mat_officers o_off ON c.officer_reviewed_by_id = o_off.id
+        LEFT JOIN mat_officers o_sec ON c.section_head_id = o_sec.id
+        LEFT JOIN mat_officers o_gov ON c.governor_id = o_gov.id
+        WHERE c.id = ?
+        """,
+        (cid,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    detail = dict(row)
+    detail["parties"] = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT * FROM mat_parties
+            WHERE complaint_id = ?
+            ORDER BY CASE WHEN party_type = 'شاكي' THEN 0 ELSE 1 END, id ASC
+            """,
+            (cid,),
+        ).fetchall()
+    ]
+    detail["scans"] = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT s.*, o.name AS uploaded_by_name
+            FROM mat_complaint_scans s
+            LEFT JOIN mat_officers o ON s.uploaded_by_id = o.id
+            WHERE s.complaint_id = ?
+            ORDER BY s.page_order ASC, s.id ASC
+            """,
+            (cid,),
+        ).fetchall()
+    ]
+    detail["workflow_log"] = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT l.*, o.name AS actor_name
+            FROM mat_complaint_workflow_log l
+            LEFT JOIN mat_officers o ON l.actor_id = o.id
+            WHERE l.complaint_id = ?
+            ORDER BY l.created_at ASC, l.id ASC
+            """,
+            (cid,),
+        ).fetchall()
+    ]
+    detail["ninety_day_status"] = compute_90_day_status(
+        detail.get("last_followup_at"),
+        detail.get("workflow_stage"),
+    )
+
+    linked_appt = None
+    if detail.get("linked_appointment_id"):
+        appt_row = conn.execute(
+            """
+            SELECT sa.*, req.name AS requested_by_name, cb.name AS created_by_name
+            FROM mat_simple_appointments sa
+            LEFT JOIN mat_officers req ON sa.requested_by_id = req.id
+            LEFT JOIN mat_officers cb ON sa.created_by_id = cb.id
+            WHERE sa.id = ?
+            """,
+            (int(detail["linked_appointment_id"]),),
+        ).fetchone()
+        if appt_row is not None:
+            linked_appt = dict(appt_row)
+    detail["linked_appointment"] = linked_appt
+
+    linked_file = None
+    if detail.get("linked_file_number"):
+        file_row = conn.execute(
+            """
+            SELECT rf.*, o.name AS officer_name
+            FROM mat_reserved_files rf
+            LEFT JOIN mat_officers o ON rf.officer_id = o.id
+            WHERE rf.file_number = ?
+            """,
+            (detail["linked_file_number"],),
+        ).fetchone()
+        if file_row is not None:
+            linked_file = dict(file_row)
+    detail["linked_file"] = linked_file
+
+    return detail
+
+
+def _expand_stage_filter(raw_stage: str) -> list[str]:
+    """Expand stage filter alias or comma-separated stages into explicit stage names."""
+    stage = str(raw_stage or "").strip()
+    if not stage or stage == "all":
+        return []
+    if stage in ("approved_in_execution", "active_execution"):
+        return ["governor_approved", "governor_modified", "in_execution"]
+    if stage == "draft":
+        return ["draft_scan", "officer_reviewed"]
+    return [part.strip() for part in stage.split(",") if part.strip()]
+
+
+def list_complaints(conn, user: dict, filters: dict = None) -> dict:
+    """List police complaints with role visibility, search/stage/90-day filters, and KPI stats."""
+    actor_id, role = _require_roles(user, ("officer", "admin", "governor", "caller"))
+    filters = filters or {}
+
+    base_clauses = []
+    base_params = []
+    if role == "caller":
+        base_clauses.append("(c.governor_final_action = 'اتصال هاتفي' OR c.linked_appointment_id IS NOT NULL)")
+
+    base_where = "WHERE " + " AND ".join(base_clauses) if base_clauses else ""
+
+    # Compute KPI stats across all visible complaints
+    stats = {
+        "total": 0,
+        "draft_scan": 0,
+        "officer_reviewed": 0,
+        "pending_section_head": 0,
+        "pending_governor": 0,
+        "approved_in_execution": 0,
+        "governor_rejected": 0,
+        "completed": 0,
+        "stopped_90_days": 0,
+        "overdue_90": 0,
+        "warning_90": 0,
+    }
+    stat_rows = conn.execute(
+        f"SELECT c.workflow_stage, c.last_followup_at FROM mat_complaints c {base_where}",
+        base_params,
+    ).fetchall()
+    for sr in stat_rows:
+        st = sr["workflow_stage"] or "draft_scan"
+        stats["total"] += 1
+        if st in ("draft_scan",):
+            stats["draft_scan"] += 1
+        elif st == "officer_reviewed":
+            stats["officer_reviewed"] += 1
+        elif st == "pending_section_head":
+            stats["pending_section_head"] += 1
+        elif st == "pending_governor":
+            stats["pending_governor"] += 1
+        elif st in ("governor_approved", "governor_modified", "in_execution"):
+            stats["approved_in_execution"] += 1
+        elif st == "governor_rejected":
+            stats["governor_rejected"] += 1
+        elif st == "completed":
+            stats["completed"] += 1
+        elif st == "stopped_90_days":
+            stats["stopped_90_days"] += 1
+
+        nd = compute_90_day_status(sr["last_followup_at"], st)
+        if nd["is_due_for_stop"]:
+            stats["overdue_90"] += 1
+        elif nd["warning_level"] == "warning":
+            stats["warning_90"] += 1
+
+    # Apply query filters
+    where_clauses = list(base_clauses)
+    query_params = list(base_params)
+
+    stage_list = _expand_stage_filter(filters.get("workflow_stage") or filters.get("stage") or "")
+    if stage_list:
+        placeholders = ", ".join("?" for _ in stage_list)
+        where_clauses.append(f"c.workflow_stage IN ({placeholders})")
+        query_params.extend(stage_list)
+
+    if _is_truthy(filters.get("mine")):
+        where_clauses.append("(c.assigned_officer_id = ? OR c.created_by_id = ?)")
+        query_params.extend([actor_id, actor_id])
+
+    assigned_filter = _clean_opt_int(filters.get("assigned_officer_id"), "assigned_officer_id") if filters.get("assigned_officer_id") else None
+    if assigned_filter is not None:
+        where_clauses.append("c.assigned_officer_id = ?")
+        query_params.append(assigned_filter)
+
+    station_filter = str(filters.get("nearest_station") or "").strip()
+    if station_filter:
+        where_clauses.append("c.nearest_station LIKE ?")
+        query_params.append(f"%{station_filter}%")
+
+    q = str(filters.get("q") or filters.get("search") or "").strip()
+    if q:
+        term = f"%{q}%"
+        where_clauses.append(
+            """
+            (
+                c.complaint_number LIKE ?
+                OR c.subject LIKE ?
+                OR c.summary LIKE ?
+                OR c.nearest_station LIKE ?
+                OR c.police_directorate LIKE ?
+                OR c.officer_notes LIKE ?
+                OR c.section_head_notes LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM mat_parties p
+                    WHERE p.complaint_id = c.id
+                      AND (p.name LIKE ? OR p.phone LIKE ? OR p.national_id LIKE ?)
+                )
+            )
+            """
+        )
+        query_params.extend([term] * 10)
+
+    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    try:
+        page = max(1, int(filters.get("page") or 1))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        limit = max(1, min(200, int(filters.get("limit") or 50)))
+    except (ValueError, TypeError):
+        limit = 50
+    offset = (page - 1) * limit
+
+    overdue_only = _is_truthy(filters.get("overdue_90") or filters.get("due_for_stop"))
+
+    base_select = f"""
+        SELECT c.*,
+               o_assigned.name AS assigned_officer_name,
+               o_created.name AS created_by_name,
+               o_sec.name AS section_head_name,
+               o_gov.name AS governor_name,
+               (SELECT COUNT(*) FROM mat_complaint_scans s WHERE s.complaint_id = c.id) AS scan_count
+        FROM mat_complaints c
+        LEFT JOIN mat_officers o_assigned ON c.assigned_officer_id = o_assigned.id
+        LEFT JOIN mat_officers o_created ON c.created_by_id = o_created.id
+        LEFT JOIN mat_officers o_sec ON c.section_head_id = o_sec.id
+        LEFT JOIN mat_officers o_gov ON c.governor_id = o_gov.id
+        {where_sql}
+        ORDER BY c.updated_at DESC, c.id DESC
+    """
+
+    if overdue_only:
+        all_rows = [dict(r) for r in conn.execute(base_select, query_params).fetchall()]
+        filtered_rows = []
+        for item in all_rows:
+            nd = compute_90_day_status(item.get("last_followup_at"), item.get("workflow_stage"))
+            if nd["is_due_for_stop"]:
+                item["ninety_day_status"] = nd
+                filtered_rows.append(item)
+        total = len(filtered_rows)
+        paged_items = filtered_rows[offset : offset + limit]
+    else:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS c FROM mat_complaints c {where_sql}",
+            query_params,
+        ).fetchone()["c"]
+        paged_rows = conn.execute(
+            f"{base_select} LIMIT ? OFFSET ?",
+            query_params + [limit, offset],
+        ).fetchall()
+        paged_items = []
+        for r in paged_rows:
+            item = dict(r)
+            item["ninety_day_status"] = compute_90_day_status(
+                item.get("last_followup_at"),
+                item.get("workflow_stage"),
+            )
+            paged_items.append(item)
+
+    # Batch-attach parties for returned page
+    if paged_items:
+        ids = [item["id"] for item in paged_items]
+        placeholders = ", ".join("?" for _ in ids)
+        party_rows = conn.execute(
+            f"""
+            SELECT * FROM mat_parties
+            WHERE complaint_id IN ({placeholders})
+            ORDER BY CASE WHEN party_type = 'شاكي' THEN 0 ELSE 1 END, id ASC
+            """,
+            ids,
+        ).fetchall()
+        parties_by_cid = {}
+        for pr in party_rows:
+            pd = dict(pr)
+            parties_by_cid.setdefault(pd["complaint_id"], []).append(pd)
+        for item in paged_items:
+            item["parties"] = parties_by_cid.get(item["id"], [])
+
+    return {
+        "complaints": paged_items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "stats": stats,
+    }
+
+
+def create_complaint_intake(conn, user: dict, payload: dict, base_dir: str) -> dict:
+    """Create a new police complaint intake record, link parties/scans, and auto-match nearest station."""
+    actor_id, role = _require_roles(user, ("officer", "admin"))
+    if not isinstance(payload, dict):
+        raise ValueError("البيانات المرسلة غير صالحة")
+
+    subject = str(payload.get("subject") or "").strip()
+    if not subject:
+        raise ValueError("موضوع الشكوى مطلوب")
+
+    submit_stage = str(payload.get("submit_stage") or payload.get("workflow_stage") or "draft_scan").strip()
+    if submit_stage not in INTAKE_ALLOWED_STAGES:
+        raise ValueError(f"مرحلة الإدخال الأولي غير صالحة: {submit_stage}")
+
+    parties = _normalize_parties(payload)
+    first_comp = next((p for p in parties if p["party_type"] == "شاكي"), None)
+    first_resp = next((p for p in parties if p["party_type"] == "مشتكى_عليه"), None)
+
+    complainant_category = str(
+        payload.get("complainant_category")
+        or (first_comp["party_category"] if first_comp else "مواطن")
+    ).strip() or "مواطن"
+    respondent_category = str(
+        payload.get("respondent_category")
+        or (first_resp["party_category"] if first_resp else "مواطن")
+    ).strip() or "مواطن"
+
+    station_info = _resolve_station_fields(payload, parties, base_dir)
+
+    complaint_number = str(payload.get("complaint_number") or "").strip()
+    if not complaint_number:
+        complaint_number = _generate_unique_complaint_number(conn)
+
+    assigned_officer_id = _clean_opt_int(payload.get("assigned_officer_id"), "assigned_officer_id")
+    if assigned_officer_id is None:
+        assigned_officer_id = actor_id
+    else:
+        _ensure_officer_exists(conn, assigned_officer_id)
+
+    ai_extracted_raw = payload.get("ai_extracted_json")
+    if isinstance(ai_extracted_raw, (dict, list)):
+        ai_extracted_json = json.dumps(ai_extracted_raw, ensure_ascii=False)
+    elif ai_extracted_raw is not None:
+        ai_extracted_json = str(ai_extracted_raw)
+    else:
+        ai_extracted_json = None
+
+    ai_confidence = _clean_opt_float(payload.get("ai_confidence"), "ai_confidence")
+
+    officer_action = str(payload.get("officer_action") or "").strip() or None
+    officer_notes = str(payload.get("officer_notes") or "").strip() or None
+    now = _now_str()
+    officer_reviewed_by_id = actor_id if (officer_action or officer_notes) else None
+    officer_reviewed_at = now if (officer_action or officer_notes) else None
+
+    last_followup_at = str(payload.get("last_followup_at") or "").strip() or now
+    legacy_status = STAGE_TO_STATUS.get(submit_stage, "جديد")
+
+    cur = conn.execute(
+        """
+        INSERT INTO mat_complaints (
+            complaint_number, subject, complaint_type, status, priority, notes,
+            assigned_officer_id, created_by_id, created_at, updated_at,
+            paper_date, complainant_category, respondent_category, summary,
+            has_signature, no_pending_lawsuit_declared, workflow_stage,
+            is_minor_police_complaint,
+            ai_provider, ai_model, ai_extracted_json, ai_analysis,
+            ai_solution_recommendation, ai_recommended_action, ai_confidence,
+            officer_action, officer_notes, officer_reviewed_by_id, officer_reviewed_at,
+            nearest_station, police_directorate, liwa_name, station_lat, station_lon,
+            last_followup_at
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?
+        )
+        """,
+        (
+            complaint_number,
+            subject,
+            str(payload.get("complaint_type") or "عام").strip() or "عام",
+            legacy_status,
+            str(payload.get("priority") or "عادي").strip() or "عادي",
+            str(payload.get("notes") or "").strip(),
+            assigned_officer_id,
+            actor_id,
+            now,
+            now,
+            str(payload.get("paper_date") or "").strip(),
+            complainant_category,
+            respondent_category,
+            str(payload.get("summary") or "").strip(),
+            1 if _is_truthy(payload.get("has_signature")) else 0,
+            1 if _is_truthy(payload.get("no_pending_lawsuit_declared")) else 0,
+            submit_stage,
+            1 if _is_truthy(payload.get("is_minor_police_complaint", True)) else 0,
+            str(payload.get("ai_provider") or "").strip() or None,
+            str(payload.get("ai_model") or "").strip() or None,
+            ai_extracted_json,
+            str(payload.get("ai_analysis") or "").strip() or None,
+            str(payload.get("ai_solution_recommendation") or "").strip() or None,
+            str(payload.get("ai_recommended_action") or "").strip() or None,
+            ai_confidence,
+            officer_action,
+            officer_notes,
+            officer_reviewed_by_id,
+            officer_reviewed_at,
+            station_info["nearest_station"],
+            station_info["police_directorate"],
+            station_info["liwa_name"],
+            station_info["station_lat"],
+            station_info["station_lon"],
+            last_followup_at,
+        ),
+    )
+    complaint_id = int(cur.lastrowid)
+
+    _insert_parties(conn, complaint_id, parties)
+    _link_scan_ids(conn, complaint_id, payload.get("scan_ids"))
+
+    _log_workflow_and_activity(
+        conn,
+        complaint_id,
+        actor_id,
+        role,
+        None,
+        submit_stage,
+        "إنشاء شكوى",
+        notes=officer_notes or subject,
+        activity_action="إنشاء شكوى أمنية",
+        activity_details=f"{complaint_number} — {subject}",
+    )
+
+    conn.commit()
+    return get_complaint_detail(conn, complaint_id)
+
+
+def update_complaint_details(conn, user: dict, complaint_id: int, payload: dict, base_dir: str) -> dict:
+    """Update editable complaint details, parties, scan links, and station match."""
+    actor_id, role = _require_roles(user, ("officer", "admin"))
+    if not isinstance(payload, dict):
+        raise ValueError("البيانات المرسلة غير صالحة")
+
+    existing = _get_complaint_or_raise(conn, complaint_id)
+    current_stage = existing.get("workflow_stage") or "draft_scan"
+    if current_stage in ("completed", "stopped_90_days"):
+        raise ValueError(f"لا يمكن تعديل شكوى مغلقة أو موقوفة ({current_stage})")
+
+    has_party_update = "parties" in payload or "complainants" in payload or "respondents" in payload
+    if has_party_update:
+        parties = _normalize_parties(payload)
+    else:
+        parties = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM mat_parties WHERE complaint_id = ? ORDER BY id ASC",
+                (int(complaint_id),),
+            ).fetchall()
+        ]
+
+    update_map = {}
+    for field in UPDATABLE_COMPLAINT_FIELDS:
+        if field not in payload:
+            continue
+        val = payload[field]
+        if field == "subject":
+            cleaned = str(val or "").strip()
+            if not cleaned:
+                raise ValueError("موضوع الشكوى لا يمكن أن يكون فارغاً")
+            update_map[field] = cleaned
+        elif field in ("has_signature", "no_pending_lawsuit_declared", "is_minor_police_complaint"):
+            update_map[field] = 1 if _is_truthy(val) else 0
+        elif field == "assigned_officer_id":
+            off_id = _clean_opt_int(val, "assigned_officer_id")
+            if off_id is not None:
+                _ensure_officer_exists(conn, off_id)
+            update_map[field] = off_id
+        elif field in ("station_lat", "station_lon", "ai_confidence"):
+            update_map[field] = _clean_opt_float(val, field)
+        elif field == "ai_extracted_json" and isinstance(val, (dict, list)):
+            update_map[field] = json.dumps(val, ensure_ascii=False)
+        else:
+            update_map[field] = str(val or "").strip()
+
+    # Resolve/re-match station if explicitly requested or station fields passed or missing
+    station_keys = {"nearest_station", "police_directorate", "liwa_name", "station_lat", "station_lon", "rematch_station"}
+    if station_keys.intersection(payload.keys()) or (has_party_update and not existing.get("nearest_station")):
+        station_info = _resolve_station_fields(payload, parties, base_dir, existing=existing)
+        update_map.update(station_info)
+
+    target_stage = current_stage
+    if "submit_stage" in payload and payload["submit_stage"]:
+        req_stage = str(payload["submit_stage"]).strip()
+        if req_stage not in INTAKE_ALLOWED_STAGES:
+            raise ValueError(f"لا يمكن الانتقال المباشر إلى المرحلة: {req_stage}")
+        if current_stage not in PRE_APPROVAL_STAGES and req_stage != current_stage:
+            raise ValueError(f"لا يمكن تغيير المرحلة من {current_stage} عبر التحديث العام")
+        target_stage = req_stage
+        update_map["workflow_stage"] = target_stage
+        update_map["status"] = STAGE_TO_STATUS.get(target_stage, existing.get("status"))
+
+    now = _now_str()
+    if update_map or has_party_update or "scan_ids" in payload:
+        update_map["updated_at"] = now
+        set_clauses = [f"{col} = ?" for col in update_map.keys()]
+        values = list(update_map.values()) + [int(complaint_id)]
+        conn.execute(
+            f"UPDATE mat_complaints SET {', '.join(set_clauses)} WHERE id = ?",
+            values,
+        )
+
+    if has_party_update:
+        conn.execute("DELETE FROM mat_parties WHERE complaint_id = ?", (int(complaint_id),))
+        _insert_parties(conn, int(complaint_id), parties)
+
+    if "scan_ids" in payload:
+        _link_scan_ids(conn, int(complaint_id), payload.get("scan_ids"))
+
+    _log_workflow_and_activity(
+        conn,
+        int(complaint_id),
+        actor_id,
+        role,
+        current_stage,
+        target_stage,
+        "تحديث بيانات الشكوى",
+        notes=str(payload.get("update_notes") or update_map.get("subject") or existing.get("subject") or ""),
+    )
+
+    conn.commit()
+    return get_complaint_detail(conn, int(complaint_id))
+
+
+def record_officer_action(conn, user: dict, complaint_id: int, payload: dict) -> dict:
+    """Record officer's action and mandatory notes during pre-approval review or post-approval execution."""
+    actor_id, role = _require_roles(user, ("officer", "admin"))
+    if not isinstance(payload, dict):
+        raise ValueError("البيانات المرسلة غير صالحة")
+
+    existing = _get_complaint_or_raise(conn, complaint_id)
+    current_stage = existing.get("workflow_stage") or "draft_scan"
+
+    officer_action = str(payload.get("officer_action") or "").strip()
+    officer_notes = str(payload.get("officer_notes") or "").strip()
+    if not officer_action:
+        raise ValueError("يجب تحديد إجراء الضابط")
+    if not officer_notes:
+        raise ValueError("ملاحظات الضابط إلزامية عند تسجيل الإجراء")
+
+    if current_stage in PRE_APPROVAL_STAGES:
+        new_stage = "pending_section_head" if _is_truthy(payload.get("send_to_section_head")) else "officer_reviewed"
+    elif current_stage in POST_APPROVAL_STAGES:
+        exec_status = str(payload.get("execution_status") or "").strip()
+        new_stage = "completed" if exec_status == "completed" else "in_execution"
+    else:
+        raise ValueError(f"لا يمكن تسجيل إجراء الضابط في المرحلة الحالية: {current_stage}")
+
+    now = _now_str()
+    new_status = STAGE_TO_STATUS.get(new_stage, existing.get("status"))
+
+    conn.execute(
+        """
+        UPDATE mat_complaints
+        SET officer_action = ?,
+            officer_notes = ?,
+            officer_reviewed_by_id = ?,
+            officer_reviewed_at = ?,
+            workflow_stage = ?,
+            status = ?,
+            last_followup_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            officer_action,
+            officer_notes,
+            actor_id,
+            now,
+            new_stage,
+            new_status,
+            now,
+            now,
+            int(complaint_id),
+        ),
+    )
+
+    _log_workflow_and_activity(
+        conn,
+        int(complaint_id),
+        actor_id,
+        role,
+        current_stage,
+        new_stage,
+        f"إجراء الضابط: {officer_action}",
+        notes=officer_notes,
+    )
+
+    conn.commit()
+    return get_complaint_detail(conn, int(complaint_id))
+
+
+def record_section_head_recommendation(conn, user: dict, complaint_id: int, payload: dict) -> dict:
+    """Record section head notes and recommended action, routing complaint to Governor."""
+    actor_id, role = _require_roles(user, ("admin",))
+    if not isinstance(payload, dict):
+        raise ValueError("البيانات المرسلة غير صالحة")
+
+    existing = _get_complaint_or_raise(conn, complaint_id)
+    current_stage = existing.get("workflow_stage") or "draft_scan"
+    if current_stage not in SECTION_HEAD_ALLOWED_STAGES:
+        raise ValueError(f"لا يمكن تنسيب رئيس القسم في المرحلة الحالية: {current_stage}")
+
+    rec_action = str(payload.get("section_recommended_action") or "").strip()
+    sec_notes = str(payload.get("section_head_notes") or "").strip()
+    if not rec_action:
+        raise ValueError("يجب تحديد الإجراء المنسب من رئيس القسم")
+    if not sec_notes:
+        raise ValueError("مشروحات القسم مطلوبة")
+
+    station = _extract_station_overrides(payload, existing)
+
+    now = _now_str()
+    new_stage = "pending_governor"
+    new_status = STAGE_TO_STATUS[new_stage]
+
+    conn.execute(
+        """
+        UPDATE mat_complaints
+        SET section_head_notes = ?,
+            section_recommended_action = ?,
+            section_head_id = ?,
+            section_head_at = ?,
+            nearest_station = ?,
+            police_directorate = ?,
+            liwa_name = ?,
+            station_lat = ?,
+            station_lon = ?,
+            workflow_stage = ?,
+            status = ?,
+            last_followup_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            sec_notes,
+            rec_action,
+            actor_id,
+            now,
+            station["nearest_station"],
+            station["police_directorate"],
+            station["liwa_name"],
+            station["station_lat"],
+            station["station_lon"],
+            new_stage,
+            new_status,
+            now,
+            now,
+            int(complaint_id),
+        ),
+    )
+
+    _log_workflow_and_activity(
+        conn,
+        int(complaint_id),
+        actor_id,
+        role,
+        current_stage,
+        new_stage,
+        f"تنسيب رئيس القسم: {rec_action}",
+        notes=sec_notes,
+    )
+
+    conn.commit()
+    return get_complaint_detail(conn, int(complaint_id))
+
+
+def record_governor_decision(conn, user: dict, complaint_id: int, payload: dict) -> dict:
+    """Record exclusive Governor decision and trigger automated MAT toolkit integrations."""
+    actor_id, role = _require_roles(user, ("governor",))
+    if not isinstance(payload, dict):
+        raise ValueError("البيانات المرسلة غير صالحة")
+
+    existing = _get_complaint_or_raise(conn, complaint_id)
+    current_stage = existing.get("workflow_stage") or "draft_scan"
+    if current_stage not in GOVERNOR_ALLOWED_STAGES:
+        raise ValueError(f"لا يمكن إصدار قرار الحاكم الإداري في المرحلة الحالية: {current_stage}")
+
+    decision = str(payload.get("decision") or "").strip()
+    if decision not in GOVERNOR_DECISIONS:
+        raise ValueError("قرار الحاكم الإداري يجب أن يكون: موافقة أو رفض أو تغيير_الإجراء")
+
+    governor_notes = str(payload.get("governor_notes") or "").strip()
+
+    if decision == "تغيير_الإجراء":
+        final_action = str(payload.get("governor_final_action") or "").strip()
+        if not final_action:
+            raise ValueError("يجب تحديد الإجراء النهائي الجديد عند تغيير الإجراء المنسب")
+        new_stage = "governor_modified"
+    elif decision == "موافقة":
+        final_action = (
+            str(payload.get("governor_final_action") or "").strip()
+            or str(existing.get("section_recommended_action") or "").strip()
+            or str(existing.get("officer_action") or "").strip()
+            or str(existing.get("ai_recommended_action") or "").strip()
+        )
+        new_stage = "governor_approved"
+    else:
+        final_action = str(payload.get("governor_final_action") or "رفض التنسيب").strip()
+        new_stage = "governor_rejected"
+
+    station = _extract_station_overrides(payload, existing)
+
+    now = _now_str()
+    new_status = STAGE_TO_STATUS[new_stage]
+
+    conn.execute(
+        """
+        UPDATE mat_complaints
+        SET governor_decision = ?,
+            governor_final_action = ?,
+            governor_notes = ?,
+            governor_id = ?,
+            governor_decided_at = ?,
+            nearest_station = ?,
+            police_directorate = ?,
+            liwa_name = ?,
+            station_lat = ?,
+            station_lon = ?,
+            workflow_stage = ?,
+            status = ?,
+            last_followup_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            decision,
+            final_action,
+            governor_notes,
+            actor_id,
+            now,
+            station["nearest_station"],
+            station["police_directorate"],
+            station["liwa_name"],
+            station["station_lat"],
+            station["station_lon"],
+            new_stage,
+            new_status,
+            now,
+            now,
+            int(complaint_id),
+        ),
+    )
+
+    if new_stage in ("governor_approved", "governor_modified"):
+        _apply_post_approval_integrations(conn, int(complaint_id), final_action, actor_id)
+
+    _log_workflow_and_activity(
+        conn,
+        int(complaint_id),
+        actor_id,
+        role,
+        current_stage,
+        new_stage,
+        f"قرار الحاكم الإداري ({decision}): {final_action}",
+        notes=governor_notes,
+    )
+
+    conn.commit()
+    return get_complaint_detail(conn, int(complaint_id))
+
+
+def register_followup(conn, user: dict, complaint_id: int, action_type: str, notes: str = "") -> dict:
+    """Register complainant follow-up (resetting 90-day counter) or invoke 90-day stop rule."""
+    actor_id, role = _require_roles(user, ("officer", "admin", "governor"))
+    existing = _get_complaint_or_raise(conn, complaint_id)
+    current_stage = existing.get("workflow_stage") or "draft_scan"
+
+    if current_stage in ("completed", "stopped_90_days"):
+        raise ValueError(f"الشكوى مغلقة أو موقوفة مسبقاً ({current_stage})")
+
+    act = str(action_type or "followup").strip().lower()
+    clean_notes = str(notes or "").strip()
+    now = _now_str()
+
+    if act == "stop_90_days":
+        status_90 = compute_90_day_status(existing.get("last_followup_at"), current_stage)
+        can_override = role in ("admin", "governor") and bool(clean_notes)
+        if status_90["days_elapsed"] < 90 and not can_override:
+            raise ValueError(
+                "لا يمكن تفعيل كف الطلب قبل مرور 90 يوماً على آخر متابعة إلا بملاحظة صريحة من رئيس القسم أو الحاكم الإداري"
+            )
+        new_stage = "stopped_90_days"
+        new_status = STAGE_TO_STATUS[new_stage]
+        conn.execute(
+            """
+            UPDATE mat_complaints
+            SET workflow_stage = ?, status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (new_stage, new_status, now, int(complaint_id)),
+        )
+        _log_workflow_and_activity(
+            conn,
+            int(complaint_id),
+            actor_id,
+            role,
+            current_stage,
+            new_stage,
+            "كف طلب (90 يوماً)",
+            notes=clean_notes or "تم تفعيل كف الطلب لمرور 90 يوماً دون مراجعة",
+        )
+    elif act in ("followup", "complainant_followup", "reset_90_days"):
+        if current_stage == "governor_rejected":
+            raise ValueError("لا يمكن إعادة ضبط المتابعة لشكوى مرفوضة")
+        conn.execute(
+            """
+            UPDATE mat_complaints
+            SET last_followup_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, now, int(complaint_id)),
+        )
+        _log_workflow_and_activity(
+            conn,
+            int(complaint_id),
+            actor_id,
+            role,
+            current_stage,
+            current_stage,
+            "متابعة الشاكي (إعادة ضبط 90 يوماً)",
+            notes=clean_notes or "تم تسجيل متابعة الشاكي وإعادة ضبط عداد الـ 90 يوماً",
+        )
+    else:
+        raise ValueError(f"نوع المتابعة غير صالح: {action_type}")
+
+    conn.commit()
+    return get_complaint_detail(conn, int(complaint_id))

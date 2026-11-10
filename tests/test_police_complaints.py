@@ -6,8 +6,11 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from unittest import mock
 
 import server
+import mat_llm_engine
+
 
 
 class TestDatabaseMigrations(unittest.TestCase):
@@ -403,6 +406,211 @@ class TestDatabaseMigrations(unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+
+class TestLlmEngine(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "test_llm.db")
+        self.backup_path = os.path.join(self.tmpdir.name, "backup.json")
+        self.orig_db = server.DB_PATH
+        self.orig_backup = server.BACKUP_JSON_PATH
+        server.DB_PATH = self.db_path
+        server.BACKUP_JSON_PATH = self.backup_path
+        server.init_db()
+
+    def tearDown(self):
+        server.DB_PATH = self.orig_db
+        server.BACKUP_JSON_PATH = self.orig_backup
+        self.tmpdir.cleanup()
+
+    def test_save_and_mask_llm_settings(self):
+        conn = server.get_db()
+        mat_llm_engine.save_llm_settings(conn, 1, {
+            "provider": "gemini",
+            "model_name": "gemini-2.5-flash",
+            "api_key": "AIzaSyTestSecretKey12345",
+            "is_enabled": 1
+        })
+        masked = mat_llm_engine.get_llm_settings(conn, mask_secret=True)
+        self.assertEqual(masked["provider"], "gemini")
+        self.assertTrue(masked["api_key_configured"])
+        self.assertNotIn("AIzaSyTestSecretKey12345", json.dumps(masked))
+        self.assertTrue(masked["api_key_masked"].endswith("2345"))
+
+        # Updating model without re-entering api_key preserves existing key
+        mat_llm_engine.save_llm_settings(conn, 1, {
+            "provider": "gemini",
+            "model_name": "gemini-2.5-pro",
+            "api_key": "",
+            "is_enabled": 1
+        })
+        unmasked = mat_llm_engine.get_llm_settings(conn, mask_secret=False)
+        self.assertEqual(unmasked["api_key"], "AIzaSyTestSecretKey12345")
+        self.assertEqual(unmasked["model_name"], "gemini-2.5-pro")
+        conn.close()
+
+    def test_extract_gemini_parses_structured_json_response(self):
+        fake_llm_json = {
+            "paper_date": "2026-11-10",
+            "complainants": [{"party_category": "مواطن", "name": "خالد محمود", "national_id": "9901012345", "phone": "0795551111", "address": "جبل الحسين"}],
+            "respondents": [{"party_category": "منشأة", "name": "كراج الأمل", "national_id": "", "phone": "0798882222", "address": "تلاع العلي شارع المدينة المنورة"}],
+            "subject": "إغلاق ممر مشاة وتعدي على رصيف عام",
+            "summary": "تقدم المواطن بشكوى ضد كراج سيارات يغلق الرصيف أمام العمارة ليلاً.",
+            "has_signature": True,
+            "no_pending_lawsuit_declared": True,
+            "is_minor_police_complaint": True,
+            "police_necessity_reason": "إزعاج وإغلاق طريق عام يتطلب متابعة مركز أمني دون نزاع قضائي كبير.",
+            "ai_analysis": "الشكوى تتعلق بمخالفة نظامية وإغلاق ممر عام في منطقة تلاع العلي.",
+            "ai_solution_recommendation": "توجيه تنبيه ومخاطبة المركز الأمني المختص لإزالة التعدي وتعهد بعدم التكرار.",
+            "ai_recommended_action": "توديع عن طريق مركز أمني",
+            "ai_confidence": 0.92
+        }
+        fake_resp_body = json.dumps({
+            "candidates": [{"content": {"parts": [{"text": "```json\n" + json.dumps(fake_llm_json, ensure_ascii=False) + "\n```"}]}}]
+        }).encode("utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = fake_resp_body
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "fake-key", "api_base_url": "", "is_enabled": 1}
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as m_open:
+            res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["extracted"]["subject"], "إغلاق ممر مشاة وتعدي على رصيف عام")
+        self.assertEqual(res["analysis"]["ai_recommended_action"], "توديع عن طريق مركز أمني")
+        self.assertTrue(res["analysis"]["is_minor_police_complaint"])
+        self.assertTrue(m_open.called)
+        called_req = m_open.call_args[0][0]
+        self.assertNotIn("fake-key", called_req.full_url)
+        self.assertEqual(called_req.get_header("X-goog-api-key"), "fake-key")
+
+    def test_extract_returns_manual_fallback_when_api_key_missing(self):
+        settings = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "", "api_base_url": "", "is_enabled": 1}
+        res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", settings)
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertIn("API key", res["message"])
+
+    def test_extract_returns_manual_fallback_when_disabled(self):
+        settings = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "key", "api_base_url": "", "is_enabled": 0}
+        res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", settings)
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertIn("disabled", res["message"])
+
+    def test_openai_payload_construction_and_parsing(self):
+        fake_llm_json = {
+            "subject": "شكوى اعتداء صوتي",
+            "summary": "إزعاج من ورشة مجاورة",
+            "ai_recommended_action": "اتصال هاتفي",
+            "is_minor_police_complaint": True
+        }
+        fake_resp_body = json.dumps({
+            "choices": [{"message": {"content": json.dumps(fake_llm_json)}}]
+        }).encode("utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = fake_resp_body
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {
+            "provider": "openai",
+            "model_name": "gpt-4o",
+            "api_key": "sk-proj-test12345",
+            "api_base_url": "https://api.openai.com/v1",
+            "is_enabled": 1
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as m_open:
+            res = mat_llm_engine.extract_and_analyze_complaint(b"fakeimagebytes", "image/jpeg", settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["extracted"]["subject"], "شكوى اعتداء صوتي")
+        self.assertEqual(res["analysis"]["ai_recommended_action"], "اتصال هاتفي")
+        req = m_open.call_args[0][0]
+        self.assertTrue(req.full_url.endswith("/chat/completions"))
+        self.assertEqual(req.get_header("Authorization"), "Bearer sk-proj-test12345")
+        payload = json.loads(req.data.decode("utf-8"))
+        self.assertEqual(payload["model"], "gpt-4o")
+        self.assertIn("data:image/jpeg;base64,", payload["messages"][0]["content"][1]["image_url"]["url"])
+
+    def test_openai_rejects_pdf_with_manual_fallback(self):
+        settings = {"provider": "openai", "model_name": "gpt-4o", "api_key": "sk-test", "api_base_url": "", "is_enabled": 1}
+        res = mat_llm_engine.extract_and_analyze_complaint(b"%PDF-1.4", "application/pdf", settings)
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertIn("PDF", res["message"])
+
+    def test_ollama_payload_construction_and_parsing(self):
+        fake_llm_json = {
+            "subject": "شكوى تسرب مياه",
+            "summary": "تسرب مياه في منور عمارة",
+            "ai_recommended_action": "توديع مغفور",
+            "is_minor_police_complaint": True
+        }
+        fake_resp_body = json.dumps({
+            "message": {"content": json.dumps(fake_llm_json)}
+        }).encode("utf-8")
+
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = fake_resp_body
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {
+            "provider": "ollama",
+            "model_name": "llama3.2-vision",
+            "api_key": "",
+            "api_base_url": "http://127.0.0.1:11434",
+            "is_enabled": 1
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as m_open:
+            res = mat_llm_engine.extract_and_analyze_complaint(b"imagebytes", "image/png", settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["extracted"]["subject"], "شكوى تسرب مياه")
+        self.assertEqual(res["analysis"]["ai_recommended_action"], "توديع مغفور")
+        req = m_open.call_args[0][0]
+        self.assertTrue(req.full_url.endswith("/api/chat"))
+        payload = json.loads(req.data.decode("utf-8"))
+        self.assertEqual(payload["model"], "llama3.2-vision")
+        self.assertEqual(payload["format"], "json")
+        self.assertEqual(len(payload["messages"][0]["images"]), 1)
+
+    def test_malformed_json_fence_cleanup(self):
+        parsed1 = mat_llm_engine._parse_llm_json("```json\n{\"subject\": \"تست 1\"}\n```")
+        self.assertEqual(parsed1["subject"], "تست 1")
+
+        parsed2 = mat_llm_engine._parse_llm_json("Here is the output:\n```\n{\"subject\": \"تست 2\", \"has_signature\": true}\n```\nHope this helps!")
+        self.assertEqual(parsed2["subject"], "تست 2")
+        self.assertTrue(parsed2["has_signature"])
+
+        parsed3 = mat_llm_engine._parse_llm_json("{\"subject\": \"تست 3\"}")
+        self.assertEqual(parsed3["subject"], "تست 3")
+
+        parsed4 = mat_llm_engine._parse_llm_json("This is not JSON at all")
+        self.assertEqual(parsed4, {})
+
+    def test_llm_connection_success_and_failure(self):
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "SECRET_KEY_1234", "api_base_url": "", "is_enabled": 1}
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            res = mat_llm_engine.test_llm_connection(settings)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["provider"], "gemini")
+
+        settings_nokey = {"provider": "gemini", "model_name": "gemini-2.5-flash", "api_key": "", "api_base_url": "", "is_enabled": 1}
+        res_nokey = mat_llm_engine.test_llm_connection(settings_nokey)
+        self.assertFalse(res_nokey["ok"])
+        self.assertIn("API key", res_nokey["message"])
+
+        with mock.patch("urllib.request.urlopen", side_effect=Exception("HTTP 403 Forbidden with key SECRET_KEY_1234")):
+            res_err = mat_llm_engine.test_llm_connection(settings)
+        self.assertFalse(res_err["ok"])
+        self.assertNotIn("SECRET_KEY_1234", res_err["message"])
+        self.assertIn("[REDACTED]", res_err["message"])
 
 
 if __name__ == "__main__":

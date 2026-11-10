@@ -23,6 +23,11 @@ import re
 import urllib.parse
 import urllib.request
 import base64
+import binascii
+from email.parser import BytesParser
+from email.policy import default as email_default_policy
+import hmac
+import posixpath
 import ssl
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
@@ -31,6 +36,9 @@ import threading
 import sys
 import mimetypes
 import shutil
+
+import mat_llm_engine
+import mat_complaints_service
 
 # ─── FCM Push Notification Helper (Zero external libraries) ─────────────
 _fcm_token_cache = {'token': None, 'expires_at': 0}
@@ -214,6 +222,21 @@ MAT_SECRET_KEY = os.environ.get('MAT_SECRET_KEY', 'mat_secret_key_2026')
 DB_PATH = MAT_DB_PATH
 PORT = MAT_PORT
 HOST = MAT_HOST
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
+SCANS_DIR = os.environ.get('MAT_SCANS_DIR', os.path.join(BASE_DIR, 'data', 'complaint_scans'))
+DOCX_TEMPLATE_PATH = os.path.join(BASE_DIR, 'complaint_form_editable.docx')
+
+
+def _get_scans_dir():
+    """Return configured complaint scans directory and ensure it exists."""
+    scans_dir = globals().get('SCANS_DIR') or os.path.join(BASE_DIR, 'data', 'complaint_scans')
+    os.makedirs(scans_dir, exist_ok=True)
+    return scans_dir
+
+
+def _get_docx_template_path():
+    """Return path to the official DOCX complaint form template."""
+    return globals().get('DOCX_TEMPLATE_PATH') or os.path.join(BASE_DIR, 'complaint_form_editable.docx')
 
 # Seed database volume if not already existing
 if not os.path.exists(DB_PATH):
@@ -1077,6 +1100,7 @@ def init_db():
 
     conn.commit()
     conn.close()
+    _get_scans_dir()
     backup_db_to_json()
 
 
@@ -1139,6 +1163,62 @@ def log_activity(conn, user_id, action, entity_type=None, entity_id=None, detail
     )
 
 
+class RequestTooLargeError(ValueError):
+    """Raised when an incoming HTTP request body exceeds MAX_REQUEST_BYTES."""
+
+
+def _normalize_url_path(raw_path):
+    """Decode and normalize a URL path; return (normalized_path, has_traversal)."""
+    decoded = urllib.parse.unquote(raw_path or '/').replace('\\', '/')
+    if '\x00' in decoded:
+        return '/', True
+    collapsed = re.sub(r'/+', '/', decoded)
+    if '..' in collapsed.split('/'):
+        return '/', True
+    norm = posixpath.normpath(collapsed)
+    if not norm.startswith('/'):
+        norm = '/' + norm
+    if collapsed.endswith('/') and not norm.endswith('/'):
+        norm += '/'
+    return norm, False
+
+
+def _is_blocked_static_path(norm_path, scans_dir=None):
+    """Return True if a static request targets protected files or directories."""
+    lower = (norm_path or '/').lower()
+    parts = [p for p in lower.split('/') if p]
+    if not parts:
+        return False
+
+    # Block hidden dotfiles/dotdirs (.env, .superpowers, .git, .firebase, .vscode, etc.)
+    if any(seg.startswith('.') for seg in parts):
+        return True
+
+    # Block direct unauthenticated access to complaint scans directory
+    if lower == '/data/complaint_scans' or lower.startswith('/data/complaint_scans/'):
+        return True
+
+    # Block internal directories and sensitive project files
+    if parts[0] in ('tests', 'scratch', '__pycache__', 'docs', 'mzt agent guide'):
+        return True
+
+    base = parts[-1]
+    if base in ('key.json', 'data_backup.json', 'amman_police_stations_data.csv'):
+        return True
+    if base.endswith(('.db', '.db-wal', '.db-shm', '.sqlite', '.sqlite3', '.json.key', '.py', '.pyc')):
+        return True
+
+    # Also block configured SCANS_DIR if located inside BASE_DIR
+    if scans_dir:
+        base_real = os.path.realpath(BASE_DIR)
+        scans_real = os.path.realpath(scans_dir)
+        req_real = os.path.realpath(os.path.join(base_real, norm_path.lstrip('/')))
+        if req_real == scans_real or req_real.startswith(scans_real + os.sep):
+            return True
+
+    return False
+
+
 # ══════════════════════════════════════════════════════════════
 #  HTTP REQUEST HANDLER
 # ══════════════════════════════════════════════════════════════
@@ -1186,9 +1266,9 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return False
         csrf_cookie = cookie.get('csrf_token')
         csrf_header = self.headers.get('X-CSRF-Token')
-        if not csrf_cookie or not csrf_header:
+        if not csrf_cookie or not csrf_header or not csrf_cookie.value:
             return False
-        return csrf_cookie.value == csrf_header
+        return hmac.compare_digest(csrf_cookie.value, csrf_header)
 
     def require_role(self, *roles):
         """Check if user has required role."""
@@ -1199,6 +1279,11 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         return user
 
     # ── Response helpers ──────────────────────────────────────
+
+    def _send_security_headers(self):
+        """Attach standard security hardening headers."""
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'SAMEORIGIN')
 
     def do_OPTIONS(self):
         """Handle CORS preflight OPTIONS requests."""
@@ -1211,12 +1296,14 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization, Cookie')
+        self._send_security_headers()
         self.end_headers()
 
     def send_json(self, data, status=200, cookie=None):
         """Send JSON response."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._send_security_headers()
         origin = self.headers.get('Origin')
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
@@ -1234,16 +1321,34 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False, default=str).encode('utf-8'))
 
-    def read_json_body(self):
-        """Read and parse JSON request body."""
-        content_length = int(self.headers.get('Content-Length', 0))
-        if content_length == 0:
-            return {}
-        body = self.rfile.read(content_length)
+    def _read_raw_body(self, max_bytes=MAX_REQUEST_BYTES):
+        """Read raw request bytes while enforcing a strict maximum payload cap."""
+        raw_len = self.headers.get('Content-Length', '0')
         try:
-            return json.loads(body.decode('utf-8'))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            content_length = int(raw_len)
+        except (ValueError, TypeError) as exc:
+            raise ValueError('ترويسة Content-Length غير صالحة') from exc
+        if content_length < 0:
+            raise ValueError('ترويسة Content-Length غير صالحة')
+        if content_length > max_bytes:
+            self.close_connection = True
+            raise RequestTooLargeError('حجم الطلب يتجاوز الحد الأقصى المسموح به (16 ميجابايت)')
+        if content_length == 0:
+            return b''
+        return self.rfile.read(content_length)
+
+    def read_json_body(self):
+        """Read and parse JSON request body safely within MAX_REQUEST_BYTES."""
+        body = self._read_raw_body(MAX_REQUEST_BYTES)
+        if not body:
             return {}
+        try:
+            parsed = json.loads(body.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError('صيغة JSON غير صالحة') from exc
+        if not isinstance(parsed, dict):
+            raise ValueError('يجب أن يكون جسم الطلب بصيغة كائن JSON')
+        return parsed
 
     def get_query_params(self):
         """Parse query string parameters."""
@@ -1254,7 +1359,11 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests."""
-        path = urllib.parse.urlparse(self.path).path
+        raw_path = urllib.parse.urlparse(self.path).path
+        path, has_traversal = _normalize_url_path(raw_path)
+        if has_traversal or _is_blocked_static_path(path, _get_scans_dir()):
+            self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
+            return
 
         # API Routes
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
@@ -1272,6 +1381,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/complaints':
             self.send_response(302)
             self.send_header('Location', '/')
+            self._send_security_headers()
             self.end_headers()
             return
 
@@ -1285,6 +1395,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             if user:
                 self.send_response(302)
                 self.send_header('Location', '/')
+                self._send_security_headers()
                 self.end_headers()
                 return
             self.serve_file('complaints/login.html')
@@ -1305,12 +1416,16 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 self.serve_file('complaints/app.html')
             return
 
-        # Default: serve static files
+        # Default: serve static files safely
         super().do_GET()
 
     def do_POST(self):
         """Handle POST requests."""
-        path = urllib.parse.urlparse(self.path).path
+        raw_path = urllib.parse.urlparse(self.path).path
+        path, has_traversal = _normalize_url_path(raw_path)
+        if has_traversal:
+            self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
+            return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
             if path.startswith('/api/') and not path.startswith('/api/v1/mat/'):
                 path = '/api/v1/mat' + path[4:]
@@ -1323,7 +1438,11 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_PUT(self):
         """Handle PUT requests."""
-        path = urllib.parse.urlparse(self.path).path
+        raw_path = urllib.parse.urlparse(self.path).path
+        path, has_traversal = _normalize_url_path(raw_path)
+        if has_traversal:
+            self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
+            return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
             if path.startswith('/api/') and not path.startswith('/api/v1/mat/'):
                 path = '/api/v1/mat' + path[4:]
@@ -1336,7 +1455,11 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         """Handle DELETE requests."""
-        path = urllib.parse.urlparse(self.path).path
+        raw_path = urllib.parse.urlparse(self.path).path
+        path, has_traversal = _normalize_url_path(raw_path)
+        if has_traversal:
+            self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
+            return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
             if path.startswith('/api/') and not path.startswith('/api/v1/mat/'):
                 path = '/api/v1/mat' + path[4:]
@@ -1348,14 +1471,20 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({'error': 'غير موجود'}, 404)
 
     def serve_file(self, filepath):
-        """Serve a specific file."""
-        full_path = os.path.join(BASE_DIR, filepath)
+        """Serve a specific file safely within BASE_DIR."""
+        clean_rel = str(filepath or '').replace('\\', '/').lstrip('/')
+        real_base = os.path.realpath(BASE_DIR)
+        full_path = os.path.realpath(os.path.join(real_base, clean_rel))
+        if not full_path.startswith(real_base + os.sep) or _is_blocked_static_path('/' + clean_rel, _get_scans_dir()):
+            self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
+            return
         if os.path.isfile(full_path):
             mime_type, _ = mimetypes.guess_type(full_path)
             if mime_type is None:
                 mime_type = 'application/octet-stream'
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
+            self._send_security_headers()
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
@@ -1365,6 +1494,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_response(404)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self._send_security_headers()
             self.end_headers()
             self.wfile.write(b'<h1>404 - File Not Found</h1>')
 
@@ -1377,6 +1507,12 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/simple-dashboard$', self.api_get_simple_dashboard),
             (r'^/api/v1/mat/complaints$', self.api_get_complaints),
             (r'^/api/v1/mat/complaints/(\d+)$', self.api_get_complaint),
+            (r'^/api/v1/mat/police-complaints/match-station$', self.api_match_police_station),
+            (r'^/api/v1/mat/police-complaints/scans/(\d+)$', self.api_get_police_complaint_scan),
+            (r'^/api/v1/mat/police-complaints/(\d+)/export-docx$', self.api_export_police_complaint_docx),
+            (r'^/api/v1/mat/police-complaints/(\d+)$', self.api_get_police_complaint_detail),
+            (r'^/api/v1/mat/police-complaints$', self.api_get_police_complaints),
+            (r'^/api/v1/mat/llm-settings$', self.api_get_llm_settings),
             (r'^/api/v1/mat/appointments$', self.api_get_appointments),
             (r'^/api/v1/mat/simple-appointments$', self.api_get_simple_appointments),
             (r'^/api/v1/mat/simple-appointments/(\d+)$', self.api_get_simple_appointment_detail),
@@ -1403,6 +1539,13 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             (r'^/api/v1/mat/login$', self.api_login),
             (r'^/api/v1/mat/logout$', self.api_logout),
             (r'^/api/v1/mat/complaints$', self.api_create_complaint),
+            (r'^/api/v1/mat/police-complaints/scan-extract$', self.api_scan_extract_complaint),
+            (r'^/api/v1/mat/police-complaints/(\d+)/officer-action$', self.api_police_complaint_officer_action),
+            (r'^/api/v1/mat/police-complaints/(\d+)/section-recommend$', self.api_police_complaint_section_recommend),
+            (r'^/api/v1/mat/police-complaints/(\d+)/governor-decision$', self.api_police_complaint_governor_decision),
+            (r'^/api/v1/mat/police-complaints/(\d+)/followup$', self.api_police_complaint_followup),
+            (r'^/api/v1/mat/police-complaints$', self.api_create_police_complaint),
+            (r'^/api/v1/mat/llm-settings/test$', self.api_test_llm_settings),
             (r'^/api/v1/mat/parties$', self.api_create_party),
             (r'^/api/v1/mat/appointments$', self.api_create_appointment),
             (r'^/api/v1/mat/simple-appointments$', self.api_create_simple_appointment),
@@ -1421,6 +1564,8 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
     def route_api_put(self, path):
         routes = [
             (r'^/api/v1/mat/complaints/(\d+)$', self.api_update_complaint),
+            (r'^/api/v1/mat/police-complaints/(\d+)$', self.api_update_police_complaint),
+            (r'^/api/v1/mat/llm-settings$', self.api_update_llm_settings),
             (r'^/api/v1/mat/parties/(\d+)$', self.api_update_party),
             (r'^/api/v1/mat/appointments/(\d+)$', self.api_update_appointment),
             (r'^/api/v1/mat/simple-appointments/(\d+)$', self.api_update_simple_appointment),
@@ -1447,8 +1592,17 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             if match:
                 try:
                     handler(*match.groups())
+                except RequestTooLargeError as e:
+                    self.send_json({'error': str(e) or 'حجم الطلب يتجاوز الحد الأقصى المسموح به'}, 413)
+                except PermissionError as e:
+                    self.send_json({'error': str(e) or 'ليس لديك صلاحية'}, 403)
+                except LookupError as e:
+                    self.send_json({'error': str(e) or 'غير موجود'}, 404)
+                except ValueError as e:
+                    self.send_json({'error': str(e) or 'بيانات غير صالحة'}, 400)
                 except Exception as e:
-                    print(f"❌ Error in {path}: {e}")
+                    safe_err = mat_llm_engine._redact_secret(str(e))
+                    print(f"❌ Error in {path}: {type(e).__name__}: {safe_err}")
                     self.send_json({'error': 'خطأ داخلي في الخادم'}, 500)
                 return
         self.send_json({'error': 'غير موجود'}, 404)
@@ -1461,6 +1615,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._send_security_headers()
         self.send_header('Cache-Control', 'public, max-age=86400')
         self.end_headers()
         with open(path, 'rb') as f:
@@ -2367,85 +2522,126 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         conn = get_db()
-        search_term = f"%{q}%"
+        try:
+            search_term = f"%{q}%"
 
-        # 1. Search simple mat_appointments
-        simple_appts = rows_to_list(conn.execute('''
-            SELECT sa.*, req.name as requested_by_name, cb.name as created_by_name
-            FROM mat_simple_appointments sa
-            LEFT JOIN mat_officers req ON sa.requested_by_id = req.id
-            LEFT JOIN mat_officers cb ON sa.created_by_id = cb.id
-            WHERE sa.case_number LIKE ? 
-               OR sa.visitor_name LIKE ? 
-               OR sa.phone LIKE ? 
-               OR sa.national_id LIKE ? 
-               OR sa.notes LIKE ? 
-               OR sa.station_name LIKE ?
-            ORDER BY sa.appointment_date DESC
-            LIMIT 20
-        ''', (search_term, search_term, search_term, search_term, search_term, search_term)).fetchall())
+            # 1. Search simple mat_appointments
+            simple_appts = rows_to_list(conn.execute('''
+                SELECT sa.*, req.name as requested_by_name, cb.name as created_by_name
+                FROM mat_simple_appointments sa
+                LEFT JOIN mat_officers req ON sa.requested_by_id = req.id
+                LEFT JOIN mat_officers cb ON sa.created_by_id = cb.id
+                WHERE sa.case_number LIKE ? 
+                   OR sa.visitor_name LIKE ? 
+                   OR sa.phone LIKE ? 
+                   OR sa.national_id LIKE ? 
+                   OR sa.notes LIKE ? 
+                   OR sa.station_name LIKE ?
+                ORDER BY sa.appointment_date DESC
+                LIMIT 20
+            ''', (search_term, search_term, search_term, search_term, search_term, search_term)).fetchall())
 
-        # 2. Search mat_parties & mat_complaints
-        results = rows_to_list(conn.execute('''
-            SELECT p.*, c.id as complaint_id, c.complaint_number, c.subject, c.status as complaint_status,
-                   c.created_at as complaint_date
-            FROM mat_parties p
-            JOIN mat_complaints c ON p.complaint_id = c.id
-            WHERE p.name LIKE ? OR p.phone LIKE ? OR p.national_id LIKE ?
-            ORDER BY c.created_at DESC
-            LIMIT 20
-        ''', (search_term, search_term, search_term)).fetchall())
+            # 2. Search mat_parties & mat_complaints
+            results = rows_to_list(conn.execute('''
+                SELECT p.*, c.id as complaint_id, c.complaint_number, c.subject, c.status as complaint_status,
+                       c.created_at as complaint_date
+                FROM mat_parties p
+                JOIN mat_complaints c ON p.complaint_id = c.id
+                WHERE p.name LIKE ? OR p.phone LIKE ? OR p.national_id LIKE ?
+                ORDER BY c.created_at DESC
+                LIMIT 20
+            ''', (search_term, search_term, search_term)).fetchall())
 
-        persons = {}
-        for r in results:
-            key = f"{r['name']}_{r['phone']}"
-            if key not in persons:
-                persons[key] = {
-                    'name': r['name'],
-                    'phone': r['phone'],
-                    'national_id': r['national_id'],
-                    'mat_complaints': []
-                }
-            appts = rows_to_list(conn.execute('''
-                SELECT a.*, ap.call_status, ap.attendance,
-                       ap.called_at, cb.name as caller_name
-                FROM mat_appointment_parties ap
-                JOIN mat_appointments a ON ap.appointment_id = a.id
-                LEFT JOIN mat_officers cb ON ap.called_by_id = cb.id
-                WHERE ap.party_id = ?
-                ORDER BY a.appointment_date DESC
-            ''', (r['id'],)).fetchall())
+            persons = {}
+            for r in results:
+                key = f"{r['name']}_{r['phone']}"
+                if key not in persons:
+                    persons[key] = {
+                        'name': r['name'],
+                        'phone': r['phone'],
+                        'national_id': r['national_id'],
+                        'mat_complaints': []
+                    }
+                appts = rows_to_list(conn.execute('''
+                    SELECT a.*, ap.call_status, ap.attendance,
+                           ap.called_at, cb.name as caller_name
+                    FROM mat_appointment_parties ap
+                    JOIN mat_appointments a ON ap.appointment_id = a.id
+                    LEFT JOIN mat_officers cb ON ap.called_by_id = cb.id
+                    WHERE ap.party_id = ?
+                    ORDER BY a.appointment_date DESC
+                ''', (r['id'],)).fetchall())
 
-            persons[key]['mat_complaints'].append({
-                'complaint_id': r['complaint_id'],
-                'complaint_number': r['complaint_number'],
-                'subject': r['subject'],
-                'status': r['complaint_status'],
-                'party_type': r['party_type'],
-                'complaint_date': r['complaint_date'],
-                'mat_appointments': appts
-            })
+                persons[key]['mat_complaints'].append({
+                    'complaint_id': r['complaint_id'],
+                    'complaint_number': r['complaint_number'],
+                    'subject': r['subject'],
+                    'status': r['complaint_status'],
+                    'party_type': r['party_type'],
+                    'complaint_date': r['complaint_date'],
+                    'mat_appointments': appts
+                })
 
-        complaint_results = rows_to_list(conn.execute('''
-            SELECT c.*, o.name as officer_name
-            FROM mat_complaints c
-            LEFT JOIN mat_officers o ON c.assigned_officer_id = o.id
-            WHERE c.complaint_number LIKE ? OR c.subject LIKE ?
-            ORDER BY c.created_at DESC
-            LIMIT 20
-        ''', (search_term, search_term)).fetchall())
+            complaint_results = rows_to_list(conn.execute('''
+                SELECT c.*, o.name as officer_name
+                FROM mat_complaints c
+                LEFT JOIN mat_officers o ON c.assigned_officer_id = o.id
+                WHERE c.complaint_number LIKE ? OR c.subject LIKE ?
+                ORDER BY c.created_at DESC
+                LIMIT 20
+            ''', (search_term, search_term)).fetchall())
 
-        # 3. Search reserved files
-        file_results = rows_to_list(conn.execute('''
-            SELECT r.*, o.name as officer_name
-            FROM mat_reserved_files r
-            JOIN mat_officers o ON r.officer_id = o.id
-            WHERE r.file_number LIKE ? OR r.notes LIKE ?
-            ORDER BY r.reserved_at DESC
-            LIMIT 20
-        ''', (search_term, search_term)).fetchall())
+            # 2b. Search police complaints (extended intake fields & parties)
+            police_extra = ""
+            if user['role'] == 'caller':
+                police_extra = "AND (c.governor_final_action = 'اتصال هاتفي' OR c.linked_appointment_id IS NOT NULL)"
 
-        conn.close()
+            police_complaints = rows_to_list(conn.execute(f'''
+                SELECT c.id, c.complaint_number, c.subject, c.summary, c.status, c.workflow_stage,
+                       c.priority, c.nearest_station, c.police_directorate, c.liwa_name,
+                       c.governor_decision, c.governor_final_action, c.last_followup_at,
+                       c.created_at, c.updated_at,
+                       o.name as assigned_officer_name, o.name as officer_name,
+                       (
+                           SELECT GROUP_CONCAT(p.name || ' (' || p.party_type || ')', ' ، ')
+                           FROM mat_parties p
+                           WHERE p.complaint_id = c.id
+                       ) as party_names
+                FROM mat_complaints c
+                LEFT JOIN mat_officers o ON c.assigned_officer_id = o.id
+                WHERE (
+                    c.complaint_number LIKE ?
+                    OR c.subject LIKE ?
+                    OR c.summary LIKE ?
+                    OR c.nearest_station LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM mat_parties p
+                        WHERE p.complaint_id = c.id
+                          AND (p.name LIKE ? OR p.phone LIKE ?)
+                    )
+                )
+                {police_extra}
+                ORDER BY COALESCE(c.updated_at, c.created_at) DESC, c.id DESC
+                LIMIT 20
+            ''', (search_term, search_term, search_term, search_term, search_term, search_term)).fetchall())
+
+            for pc in police_complaints:
+                pc['ninety_day_status'] = mat_complaints_service.compute_90_day_status(
+                    pc.get('last_followup_at'),
+                    pc.get('workflow_stage'),
+                )
+
+            # 3. Search reserved files
+            file_results = rows_to_list(conn.execute('''
+                SELECT r.*, o.name as officer_name
+                FROM mat_reserved_files r
+                JOIN mat_officers o ON r.officer_id = o.id
+                WHERE r.file_number LIKE ? OR r.notes LIKE ?
+                ORDER BY r.reserved_at DESC
+                LIMIT 20
+            ''', (search_term, search_term)).fetchall())
+        finally:
+            conn.close()
 
         # 4. Search Map Locations (from data/amman_areas.json)
         location_results = []
@@ -2474,6 +2670,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             'mat_simple_appointments': simple_appts,
             'persons': list(persons.values()),
             'mat_complaints': complaint_results,
+            'police_complaints': police_complaints,
             'files': file_results,
             'locations': location_results,
             'query': q
@@ -2502,69 +2699,78 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({'officers': mat_officers, 'mat_officers': mat_officers})
 
     def api_create_officer(self):
-        user = self.require_auth()
+        user = self.require_role('admin')
         if not user:
             return
 
         data = self.read_json_body()
-        name = data.get('name', '').strip()
-        username = data.get('username', '').strip()
-        password = data.get('password', '')
-        role = data.get('role', 'officer')
+        name = str(data.get('name') or '').strip()
+        username = str(data.get('username') or '').strip()
+        password = str(data.get('password') or '')
+        role = str(data.get('role') or 'officer').strip()
 
-        # Validation removed
+        if not name or not username:
+            self.send_json({'error': 'الاسم واسم المستخدم مطلوبان'}, 400)
+            return
 
-        if role not in ('admin', 'officer', 'caller'):
+        if role not in ('admin', 'officer', 'caller', 'governor'):
             self.send_json({'error': 'دور غير صالح'}, 400)
             return
 
         conn = get_db()
-        existing = conn.execute("SELECT id FROM mat_officers WHERE username = ?", (username,)).fetchone()
-        if existing:
-            conn.close()
-            self.send_json({'error': 'اسم المستخدم موجود مسبقاً'}, 400)
-            return
+        try:
+            existing = conn.execute("SELECT id FROM mat_officers WHERE username = ?", (username,)).fetchone()
+            if existing:
+                self.send_json({'error': 'اسم المستخدم موجود مسبقاً'}, 400)
+                return
 
-        salt = uuid.uuid4().hex
-        pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
-        c = conn.execute(
-            "INSERT INTO mat_officers (name, username, password_hash, salt, role, accessible_tools) VALUES (?,?,?,?,?,?)",
-            (name, username, pw_hash, salt, role, data.get('accessible_tools', 'mat_complaints,finder'))
-        )
-        log_activity(conn, user['user_id'], 'إنشاء حساب', 'officer', c.lastrowid, f"{name} ({role})")
-        conn.commit()
-        conn.close()
+            salt = uuid.uuid4().hex
+            pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
+            c = conn.execute(
+                "INSERT INTO mat_officers (name, username, password_hash, salt, role, accessible_tools) VALUES (?,?,?,?,?,?)",
+                (name, username, pw_hash, salt, role, data.get('accessible_tools', 'mat_complaints,finder'))
+            )
+            new_id = c.lastrowid
+            log_activity(conn, user['user_id'], 'إنشاء حساب', 'officer', new_id, f"{name} ({role})")
+            conn.commit()
+        finally:
+            conn.close()
         backup_db_to_json()
-        self.send_json({'success': True, 'id': c.lastrowid}, 201)
+        self.send_json({'success': True, 'id': new_id}, 201)
 
     def api_update_officer(self, officer_id):
-        user = self.require_auth()
+        user = self.require_role('admin')
         if not user:
             return
 
         data = self.read_json_body()
+        if 'role' in data and data['role'] not in ('admin', 'officer', 'caller', 'governor'):
+            self.send_json({'error': 'دور غير صالح'}, 400)
+            return
+
         conn = get_db()
-        fields, values = [], []
+        try:
+            fields, values = [], []
 
-        for key in ['name', 'role', 'is_active', 'accessible_tools']:
-            if key in data:
-                fields.append(f"{key} = ?")
-                values.append(data[key])
+            for key in ['name', 'role', 'is_active', 'accessible_tools']:
+                if key in data:
+                    fields.append(f"{key} = ?")
+                    values.append(data[key])
 
-        # Handle password reset
-        if data.get('password'):
-            salt = uuid.uuid4().hex
-            pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', data['password'].encode(), salt.encode(), 100000).hex()
-            fields.extend(['password_hash = ?', 'salt = ?'])
-            values.extend([pw_hash, salt])
+            # Handle password reset
+            if data.get('password'):
+                salt = uuid.uuid4().hex
+                pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', data['password'].encode(), salt.encode(), 100000).hex()
+                fields.extend(['password_hash = ?', 'salt = ?'])
+                values.extend([pw_hash, salt])
 
-        if fields:
-            fields.append("updated_at = datetime('now', 'localtime')")
-            values.append(officer_id)
-            conn.execute(f"UPDATE mat_officers SET {', '.join(fields)} WHERE id = ?", values)
-            conn.commit()
-
-        conn.close()
+            if fields:
+                fields.append("updated_at = datetime('now', 'localtime')")
+                values.append(officer_id)
+                conn.execute(f"UPDATE mat_officers SET {', '.join(fields)} WHERE id = ?", values)
+                conn.commit()
+        finally:
+            conn.close()
         backup_db_to_json()
         self.send_json({'success': True})
 
@@ -3212,6 +3418,553 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
             
         self.send_json({'file': file_info, 'history': history})
+
+    # ── POLICE COMPLAINTS INTAKE & WORKFLOW API ───────────────
+
+    def _dispatch_complaint_notifications(self, actor_id, detail):
+        """Send background FCM notifications on complaint stage transitions."""
+        if not isinstance(detail, dict):
+            return
+        stage = str(detail.get('workflow_stage') or '').strip()
+        comp_id = detail.get('id')
+        comp_num = str(detail.get('complaint_number') or f'PC-{comp_id}')
+        subject = str(detail.get('subject') or '').strip()
+
+        target_roles = set()
+        target_user_ids = set()
+
+        if stage == 'pending_section_head':
+            target_roles.add('admin')
+            title = 'شكوى أمنية بانتظار تنسيب رئيس القسم'
+            body = f'الشكوى {comp_num}: {subject}'.strip(': ')
+        elif stage == 'pending_governor':
+            target_roles.add('governor')
+            title = 'شكوى مرفوعة لقرار الحاكم الإداري'
+            body = f'الشكوى {comp_num}: {subject}'.strip(': ')
+        elif stage in ('governor_approved', 'governor_modified', 'governor_rejected'):
+            target_roles.add('admin')
+            for uid_key in ('assigned_officer_id', 'created_by_id'):
+                raw_uid = detail.get(uid_key)
+                if raw_uid:
+                    try:
+                        target_user_ids.add(int(raw_uid))
+                    except (ValueError, TypeError):
+                        pass
+            final_action = str(detail.get('governor_final_action') or '').strip()
+            if stage in ('governor_approved', 'governor_modified') and final_action == 'اتصال هاتفي':
+                target_roles.add('caller')
+            if stage == 'governor_approved':
+                title = 'تمت موافقة الحاكم الإداري على الشكوى'
+            elif stage == 'governor_modified':
+                title = 'قرار الحاكم الإداري: تعديل الإجراء المنسب'
+            else:
+                title = 'تم رفض تنسيب الشكوى من الحاكم الإداري'
+            body = f'{comp_num} — {final_action or subject}'.strip(' —')
+        else:
+            return
+
+        payload_meta = {
+            'type': 'police_complaint',
+            'complaint_id': str(comp_id or ''),
+            'workflow_stage': stage,
+            'url': f'/complaints/app.html#police-complaints-{comp_id}',
+        }
+
+        def _notify_worker():
+            conn_fcm = None
+            try:
+                conn_fcm = get_db()
+                recipients = rows_to_list(conn_fcm.execute(
+                    "SELECT id, role, fcm_token FROM mat_officers WHERE is_active = 1 AND fcm_token IS NOT NULL AND fcm_token != ''"
+                ).fetchall())
+            except Exception as exc:
+                print(f"[!] Error querying complaint FCM recipients: {exc}")
+                return
+            finally:
+                if conn_fcm is not None:
+                    conn_fcm.close()
+
+            seen_tokens = set()
+            for row in recipients:
+                rid = row.get('id')
+                rrole = row.get('role')
+                tok = str(row.get('fcm_token') or '').strip()
+                if not tok or rid == actor_id or tok in seen_tokens:
+                    continue
+                if rrole in target_roles or rid in target_user_ids:
+                    seen_tokens.add(tok)
+                    try:
+                        send_fcm_notification(
+                            target_token=tok,
+                            title=title,
+                            body=body,
+                            data_payload=payload_meta,
+                        )
+                    except Exception as exc:
+                        print(f"[!] Complaint FCM push failed: {exc}")
+
+        threading.Thread(target=_notify_worker, daemon=True).start()
+
+    def _extract_scan_upload_from_request(self):
+        """Parse scan upload from either multipart/form-data (stdlib email.parser) or JSON base64."""
+        raw_body = self._read_raw_body(MAX_REQUEST_BYTES)
+        content_type = self.headers.get('Content-Type', '') or ''
+
+        if 'multipart/form-data' in content_type.lower():
+            if '\r' in content_type or '\n' in content_type:
+                raise ValueError('ترويسة Content-Type غير صالحة')
+            if 'boundary=' not in content_type.lower():
+                raise ValueError('حدود multipart مفقودة')
+            header_bytes = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode('latin-1', errors='replace')
+            msg = BytesParser(policy=email_default_policy).parsebytes(header_bytes + raw_body)
+            if not msg.is_multipart():
+                raise ValueError('طلب multipart غير صالح')
+
+            file_bytes = None
+            filename = 'scan'
+            complaint_id_raw = None
+            page_order_raw = 1
+
+            for part in msg.iter_parts():
+                field_name = (part.get_param('name', header='content-disposition') or '').strip()
+                part_filename = part.get_filename()
+                payload_bytes = part.get_payload(decode=True)
+                if payload_bytes is None:
+                    payload_bytes = b''
+
+                if part_filename is not None or field_name in ('file', 'scan', 'document', 'image'):
+                    if file_bytes is None:
+                        file_bytes = payload_bytes
+                        filename = part_filename or field_name or 'scan'
+                elif field_name == 'complaint_id':
+                    complaint_id_raw = payload_bytes.decode('utf-8', errors='replace').strip()
+                elif field_name == 'page_order':
+                    page_order_raw = payload_bytes.decode('utf-8', errors='replace').strip() or 1
+
+            if file_bytes is None:
+                raise ValueError('لم يتم العثور على ملف مرفق في الطلب')
+            return file_bytes, filename, complaint_id_raw, page_order_raw
+
+        # JSON base64 payload
+        if not raw_body:
+            raise ValueError('بيانات الملف مطلوبة')
+        try:
+            data = json.loads(raw_body.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError('صيغة JSON غير صالحة') from exc
+        if not isinstance(data, dict):
+            raise ValueError('يجب أن يكون جسم الطلب بصيغة كائن JSON')
+
+        filename = str(data.get('filename') or 'scan').strip() or 'scan'
+        b64_raw = data.get('file_base64') or data.get('data_url') or data.get('file') or ''
+        if not isinstance(b64_raw, str) or not b64_raw.strip():
+            raise ValueError('بيانات الملف (file_base64) مطلوبة')
+
+        b64_clean = b64_raw.strip()
+        if b64_clean.startswith('data:') and ';base64,' in b64_clean:
+            b64_clean = b64_clean.split(';base64,', 1)[1].strip()
+        b64_clean = re.sub(r'\s+', '', b64_clean)
+        if not b64_clean:
+            raise ValueError('بيانات الملف (file_base64) فارغة')
+
+        try:
+            file_bytes = base64.b64decode(b64_clean, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError('ترميز الملف base64 غير صالح') from exc
+
+        return file_bytes, filename, data.get('complaint_id'), data.get('page_order', 1)
+
+    def api_get_police_complaints(self):
+        user = self.require_role('officer', 'admin', 'governor', 'caller')
+        if not user:
+            return
+        params = self.get_query_params()
+        conn = get_db()
+        try:
+            result = mat_complaints_service.list_complaints(conn, user, params)
+        finally:
+            conn.close()
+        self.send_json(result)
+
+    def api_get_police_complaint_detail(self, complaint_id):
+        user = self.require_role('officer', 'admin', 'governor', 'caller')
+        if not user:
+            return
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.get_complaint_detail(conn, int(complaint_id))
+        finally:
+            conn.close()
+        if not detail:
+            raise LookupError('الشكوى غير موجودة')
+        if user['role'] == 'caller' and detail.get('governor_final_action') != 'اتصال هاتفي' and not detail.get('linked_appointment_id'):
+            raise PermissionError('غير مصرح لضابط الاتصال بعرض هذه الشكوى')
+        self.send_json(detail)
+
+    def api_get_police_complaint_scan(self, scan_id):
+        user = self.require_role('officer', 'admin', 'governor')
+        if not user:
+            return
+        conn = get_db()
+        try:
+            scan = dict_from_row(conn.execute(
+                "SELECT id, complaint_id, stored_filename, original_filename, mime_type FROM mat_complaint_scans WHERE id = ?",
+                (int(scan_id),),
+            ).fetchone())
+        finally:
+            conn.close()
+
+        if not scan:
+            raise LookupError('المرفق الممسوح غير موجود')
+
+        file_path = mat_complaints_service.resolve_scan_path(scan['stored_filename'], _get_scans_dir())
+        if not os.path.isfile(file_path):
+            raise LookupError('ملف السكانر غير موجود على القرص')
+
+        mime_type = scan.get('mime_type') or 'application/octet-stream'
+        if mime_type not in ('image/jpeg', 'image/png', 'image/webp', 'application/pdf'):
+            mime_type = 'application/octet-stream'
+        ext = os.path.splitext(scan['stored_filename'])[1].lower()
+        safe_ext = ext if ext in ('.jpg', '.jpeg', '.png', '.webp', '.pdf') else ''
+        params = self.get_query_params()
+        disp = 'attachment' if params.get('download') == '1' else 'inline'
+
+        with open(file_path, 'rb') as f:
+            content = f.read()
+
+        self.send_response(200)
+        self.send_header('Content-Type', mime_type)
+        self.send_header('Content-Length', str(len(content)))
+        self.send_header('Content-Disposition', f'{disp}; filename="scan_{int(scan_id)}{safe_ext}"')
+        self._send_security_headers()
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(content)
+
+    def api_export_police_complaint_docx(self, complaint_id):
+        user = self.require_role('officer', 'admin', 'governor')
+        if not user:
+            return
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.get_complaint_detail(conn, int(complaint_id))
+        finally:
+            conn.close()
+
+        if not detail:
+            raise LookupError('الشكوى غير موجودة')
+
+        doc_bytes = mat_complaints_service.export_complaint_docx(detail, _get_docx_template_path())
+        raw_num = str(detail.get('complaint_number') or f"complaint_{detail['id']}")
+        safe_num = re.sub(r'[^A-Za-z0-9_-]', '_', raw_num).strip('_') or f"complaint_{detail['id']}"
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        self.send_header('Content-Length', str(len(doc_bytes)))
+        self.send_header('Content-Disposition', f'attachment; filename="{safe_num}.docx"')
+        self._send_security_headers()
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(doc_bytes)
+
+    def api_match_police_station(self):
+        user = self.require_role('officer', 'admin', 'governor', 'caller')
+        if not user:
+            return
+        params = self.get_query_params()
+        address = (params.get('address') or params.get('q') or '').strip()
+        res = mat_complaints_service.match_nearest_police_station(address, BASE_DIR)
+        self.send_json(res)
+
+    def api_scan_extract_complaint(self):
+        user = self.require_role('officer', 'admin')
+        if not user:
+            return
+
+        file_bytes, filename, complaint_id_raw, page_order_raw = self._extract_scan_upload_from_request()
+        complaint_id = (
+            mat_complaints_service._clean_opt_int(complaint_id_raw, 'complaint_id')
+            if complaint_id_raw not in (None, '')
+            else None
+        )
+        page_order = mat_complaints_service._clean_opt_int(page_order_raw, 'page_order') or 1
+
+        conn = get_db()
+        stored = None
+        try:
+            if complaint_id is not None:
+                exists = conn.execute("SELECT id FROM mat_complaints WHERE id = ?", (complaint_id,)).fetchone()
+                if not exists:
+                    raise LookupError('الشكوى المحددة غير موجودة')
+
+            stored = mat_complaints_service.validate_and_store_scan(file_bytes, filename, _get_scans_dir())
+            settings = mat_llm_engine.get_llm_settings(conn, mask_secret=False)
+            llm_res = mat_llm_engine.extract_and_analyze_complaint(file_bytes, stored['mime_type'], settings)
+
+            extracted = llm_res.get('extracted') or {}
+            resp_addr = ''
+            for r in extracted.get('respondents') or []:
+                if isinstance(r, dict) and (r.get('address') or '').strip():
+                    resp_addr = r['address'].strip()
+                    break
+            matched_station = (
+                mat_complaints_service.match_nearest_police_station(resp_addr, BASE_DIR)
+                if resp_addr
+                else mat_complaints_service.match_nearest_police_station('', BASE_DIR)
+            )
+
+            cur = conn.execute(
+                """
+                INSERT INTO mat_complaint_scans (
+                    complaint_id, stored_filename, original_filename, mime_type,
+                    file_size, page_order, ocr_raw_text, uploaded_by_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    complaint_id,
+                    stored['stored_filename'],
+                    stored['original_filename'],
+                    stored['mime_type'],
+                    stored['file_size'],
+                    page_order,
+                    llm_res.get('raw_text', ''),
+                    user['user_id'],
+                ),
+            )
+            scan_id = int(cur.lastrowid)
+            log_activity(conn, user['user_id'], 'مسح ضوئي لشكوى', 'complaint_scan', scan_id, stored['original_filename'])
+            conn.commit()
+        except Exception:
+            if stored and stored.get('abs_path') and os.path.exists(stored['abs_path']):
+                try:
+                    os.unlink(stored['abs_path'])
+                except OSError:
+                    pass
+            raise
+        finally:
+            conn.close()
+
+        backup_db_to_json()
+        self.send_json({
+            'success': True,
+            'scan_id': scan_id,
+            'scan': {
+                'id': scan_id,
+                'original_filename': stored['original_filename'],
+                'mime_type': stored['mime_type'],
+                'file_size': stored['file_size'],
+                'page_order': page_order,
+                'url': f"/api/v1/mat/police-complaints/scans/{scan_id}",
+            },
+            'status': llm_res.get('status', 'manual_fallback'),
+            'provider': llm_res.get('provider', ''),
+            'model': llm_res.get('model', ''),
+            'extracted': extracted,
+            'analysis': llm_res.get('analysis') or {},
+            'raw_text': llm_res.get('raw_text', ''),
+            'message': llm_res.get('message', ''),
+            'station_match': matched_station,
+        })
+
+    def api_create_police_complaint(self):
+        user = self.require_role('officer', 'admin')
+        if not user:
+            return
+        data = self.read_json_body()
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.create_complaint_intake(conn, user, data, BASE_DIR)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self._dispatch_complaint_notifications(user['user_id'], detail)
+        self.send_json(detail, 201)
+
+    def api_update_police_complaint(self, complaint_id):
+        data = self.read_json_body()
+        if (
+            isinstance(data, dict)
+            and 'followup_action' in data
+            and set(data.keys()).issubset({'followup_action', 'action_type', 'notes'})
+        ):
+            user = self.require_role('officer', 'admin', 'governor')
+            if not user:
+                return
+            conn = get_db()
+            try:
+                detail = mat_complaints_service.register_followup(
+                    conn,
+                    user,
+                    int(complaint_id),
+                    data.get('followup_action') or data.get('action_type') or 'followup',
+                    data.get('notes', ''),
+                )
+            finally:
+                conn.close()
+            backup_db_to_json()
+            self.send_json(detail)
+            return
+
+        user = self.require_role('officer', 'admin')
+        if not user:
+            return
+        conn = get_db()
+        try:
+            prev_row = conn.execute("SELECT workflow_stage FROM mat_complaints WHERE id = ?", (int(complaint_id),)).fetchone()
+            prev_stage = prev_row['workflow_stage'] if prev_row else None
+            detail = mat_complaints_service.update_complaint_details(conn, user, int(complaint_id), data, BASE_DIR)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        if prev_stage != 'pending_section_head' and detail.get('workflow_stage') == 'pending_section_head':
+            self._dispatch_complaint_notifications(user['user_id'], detail)
+        self.send_json(detail)
+
+    def api_police_complaint_officer_action(self, complaint_id):
+        user = self.require_role('officer', 'admin')
+        if not user:
+            return
+        data = self.read_json_body()
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.record_officer_action(conn, user, int(complaint_id), data)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self._dispatch_complaint_notifications(user['user_id'], detail)
+        self.send_json(detail)
+
+    def api_police_complaint_section_recommend(self, complaint_id):
+        user = self.require_role('admin')
+        if not user:
+            return
+        data = self.read_json_body()
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.record_section_head_recommendation(conn, user, int(complaint_id), data)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self._dispatch_complaint_notifications(user['user_id'], detail)
+        self.send_json(detail)
+
+    def api_police_complaint_governor_decision(self, complaint_id):
+        user = self.require_role('governor')
+        if not user:
+            return
+        data = self.read_json_body()
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.record_governor_decision(conn, user, int(complaint_id), data)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self._dispatch_complaint_notifications(user['user_id'], detail)
+        self.send_json(detail)
+
+    def api_police_complaint_followup(self, complaint_id):
+        user = self.require_role('officer', 'admin', 'governor')
+        if not user:
+            return
+        data = self.read_json_body()
+        action_type = data.get('action_type') or data.get('action') or 'followup'
+        notes = data.get('notes') or ''
+        conn = get_db()
+        try:
+            detail = mat_complaints_service.register_followup(conn, user, int(complaint_id), action_type, notes)
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self.send_json(detail)
+
+    def api_get_llm_settings(self):
+        user = self.require_role('admin')
+        if not user:
+            return
+        conn = get_db()
+        try:
+            settings = mat_llm_engine.get_llm_settings(conn, mask_secret=True)
+        finally:
+            conn.close()
+        self.send_json(settings)
+
+    def api_update_llm_settings(self):
+        user = self.require_role('admin')
+        if not user:
+            return
+        data = self.read_json_body()
+        provider = str(data.get('provider') or 'gemini').strip().lower()
+        if provider not in ('gemini', 'openai', 'ollama'):
+            raise ValueError(f"مزود الذكاء الاصطناعي غير مدعوم: {provider}")
+        base_url = str(data.get('api_base_url') or '').strip()
+        if base_url and not re.match(r'^https?://', base_url, re.IGNORECASE):
+            raise ValueError('رابط api_base_url يجب أن يبدأ بـ http:// أو https://')
+
+        clean_payload = dict(data)
+        clean_payload['provider'] = provider
+        clean_payload['api_base_url'] = base_url
+        raw_key = clean_payload.get('api_key')
+        if isinstance(raw_key, str) and raw_key.strip().startswith('****'):
+            clean_payload['api_key'] = ''
+
+        conn = get_db()
+        try:
+            saved = mat_llm_engine.save_llm_settings(conn, user['user_id'], clean_payload)
+            log_activity(
+                conn,
+                user['user_id'],
+                'تحديث إعدادات الذكاء الاصطناعي',
+                'llm_settings',
+                1,
+                f"provider={saved.get('provider')}, model={saved.get('model_name')}",
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        backup_db_to_json()
+        self.send_json(saved)
+
+    def api_test_llm_settings(self):
+        user = self.require_role('admin')
+        if not user:
+            return
+        data = self.read_json_body()
+        conn = get_db()
+        try:
+            stored = mat_llm_engine.get_llm_settings(conn, mask_secret=False)
+        finally:
+            conn.close()
+
+        test_cfg = dict(stored)
+        if 'provider' in data and str(data.get('provider') or '').strip():
+            new_prov = str(data['provider']).strip().lower()
+            if new_prov not in ('gemini', 'openai', 'ollama'):
+                raise ValueError(f"مزود الذكاء الاصطناعي غير مدعوم: {new_prov}")
+            if new_prov != stored.get('provider'):
+                test_cfg['api_key'] = ''
+                test_cfg['model_name'] = ''
+            test_cfg['provider'] = new_prov
+
+        if 'model_name' in data and str(data.get('model_name') or '').strip():
+            test_cfg['model_name'] = str(data['model_name']).strip()
+        elif not test_cfg.get('model_name'):
+            test_cfg['model_name'] = mat_llm_engine._default_model_for_provider(test_cfg.get('provider', 'gemini'))
+
+        if 'api_base_url' in data:
+            base_url = str(data.get('api_base_url') or '').strip()
+            if base_url and not re.match(r'^https?://', base_url, re.IGNORECASE):
+                raise ValueError('رابط api_base_url يجب أن يبدأ بـ http:// أو https://')
+            test_cfg['api_base_url'] = base_url
+
+        if 'is_enabled' in data:
+            test_cfg['is_enabled'] = 1 if data['is_enabled'] in (1, '1', True) else 0
+
+        raw_key = data.get('api_key')
+        if isinstance(raw_key, str) and raw_key.strip() and not raw_key.strip().startswith('****'):
+            test_cfg['api_key'] = raw_key.strip()
+
+        result = mat_llm_engine.test_llm_connection(test_cfg)
+        self.send_json(result)
 
 
 # ══════════════════════════════════════════════════════════════

@@ -20,6 +20,9 @@ tiles/
 # Scratch/test files
 scratch/
 
+# Uploaded complaint scan files
+data/complaint_scans/
+
 # OS files
 Thumbs.db
 .DS_Store

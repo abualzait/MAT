@@ -87,11 +87,14 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         return op, jar
 
     def test_01_static_file_protection_and_security_headers(self):
-        # Unauthenticated static access to sensitive paths MUST be blocked (403 or 404)
+        # Unauthenticated static access to sensitive paths MUST be strictly blocked (403)
         anon_op, anon_jar = self._new_client()
         blocked_paths = [
             "/data/complaint_scans/nonexistent.png",
             "/data/complaint_scans/",
+            "//data/complaint_scans/nonexistent.png",
+            "//.superpowers/sdd/2026-11-10-police-complaints-intake/progress.md",
+            "/data/",
             "/.env",
             "/key.json",
             "/data_backup.json",
@@ -106,15 +109,18 @@ class TestPoliceComplaintsApi(unittest.TestCase):
                 conn.request("GET", path)
                 resp = conn.getresponse()
                 resp.read()
-                self.assertIn(resp.status, (403, 404), f"Expected 403/404 for {path}, got {resp.status}")
+                self.assertEqual(resp.status, 403, f"Expected 403 for {path}, got {resp.status}")
+                self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff")
+                self.assertEqual(resp.getheader("X-Frame-Options"), "SAMEORIGIN")
             finally:
                 conn.close()
 
-        # Public login page must have security headers
-        st, hdrs, _ = self._req(anon_op, anon_jar, "GET", "/complaints/login.html")
-        self.assertEqual(st, 200)
-        self.assertEqual(hdrs.get("X-Content-Type-Options"), "nosniff")
-        self.assertEqual(hdrs.get("X-Frame-Options"), "SAMEORIGIN")
+        # Public login page (serve_file) and static fallback asset (super().do_GET) must have security headers
+        for pub_path in ("/complaints/login.html", "/leaflet.css"):
+            st, hdrs, _ = self._req(anon_op, anon_jar, "GET", pub_path)
+            self.assertEqual(st, 200)
+            self.assertEqual(hdrs.get_all("X-Content-Type-Options"), ["nosniff"])
+            self.assertEqual(hdrs.get_all("X-Frame-Options"), ["SAMEORIGIN"])
 
         # Unauthenticated API access -> 401 with security headers
         st, hdrs, _ = self._req(anon_op, anon_jar, "GET", "/api/v1/mat/police-complaints")
@@ -298,7 +304,7 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         self.assertEqual(hdrs.get("X-Frame-Options"), "SAMEORIGIN")
         self.assertEqual(dl_bytes, PNG_BYTES)
 
-        # Unauthenticated scan download is rejected (401), and direct static path is blocked (403)
+        # Unauthenticated scan download is rejected (401), and direct static paths (including // bypass) return 403
         anon_op, anon_jar = self._new_client()
         self.assertEqual(
             self._req(anon_op, anon_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan_res['scan_id']}")[0],
@@ -306,9 +312,44 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         )
         stored_files = os.listdir(server.SCANS_DIR)
         self.assertTrue(stored_files)
-        self.assertIn(
-            self._req(anon_op, anon_jar, "GET", f"/data/complaint_scans/{stored_files[0]}")[0],
-            (403, 404),
+        for direct_path in (
+            f"/data/complaint_scans/{stored_files[0]}",
+            f"//data/complaint_scans/{stored_files[0]}",
+        ):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            try:
+                conn.request("GET", direct_path)
+                resp = conn.getresponse()
+                resp.read()
+                self.assertEqual(resp.status, 403, f"Expected 403 for {direct_path}, got {resp.status}")
+            finally:
+                conn.close()
+
+        # Unauthenticated PUT with malformed JSON body must return 401 (auth BEFORE body parse), not 400
+        # Include CSRF cookie/header so CSRF passes and we exercise api_update_police_complaint auth order
+        anon_csrf = "testcsrf123"
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.request(
+                "PUT",
+                f"/api/v1/mat/police-complaints/{cid}",
+                body=b"{malformed-json",
+                headers={
+                    "Content-Type": "application/json",
+                    "Cookie": f"csrf_token={anon_csrf}",
+                    "X-CSRF-Token": anon_csrf,
+                },
+            )
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 401)
+        finally:
+            conn.close()
+
+        # Governor attempting non-followup PUT edit must return 403
+        self.assertEqual(
+            self._req(gov_op, gov_jar, "PUT", f"/api/v1/mat/police-complaints/{cid}", {"notes": "تعديل غير مصرح"})[0],
+            403,
         )
 
         # Export filled DOCX
@@ -397,7 +438,7 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         )
         self.assertEqual(st, 400)
 
-        # Oversized Content-Length > MAX_REQUEST_BYTES -> 413
+        # Oversized Content-Length > MAX_REQUEST_BYTES -> strictly 413
         csrf_val = next(c.value for c in off_jar if c.name == "csrf_token")
         sess_val = next(c.value for c in off_jar if c.name == "session")
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -410,7 +451,7 @@ class TestPoliceComplaintsApi(unittest.TestCase):
             conn.endheaders()
             resp = conn.getresponse()
             resp.read()
-            self.assertIn(resp.status, (400, 413))
+            self.assertEqual(resp.status, 413)
         finally:
             conn.close()
 
@@ -419,6 +460,16 @@ class TestPoliceComplaintsApi(unittest.TestCase):
 
         # Missing subject on create -> 400 (ValueError)
         self.assertEqual(self._req(off_op, off_jar, "POST", "/api/v1/mat/police-complaints", {"subject": ""})[0], 400)
+
+        # Internal KeyError / IndexError must map to 500 (not 404 via LookupError!)
+        with mock.patch.object(
+            server.mat_complaints_service,
+            "list_complaints",
+            side_effect=KeyError("missing_internal_field"),
+        ):
+            st, _, raw = self._req(off_op, off_jar, "GET", "/api/v1/mat/police-complaints")
+        self.assertEqual(st, 500)
+        self.assertIn("خطأ داخلي في الخادم", raw.decode("utf-8"))
 
         # Unexpected internal exception -> 500 generic Arabic message without leaking secrets or SQL details
         with mock.patch.object(
@@ -504,6 +555,29 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         fetched = json.loads(raw.decode("utf-8"))
         self.assertNotIn("api_key", fetched)
         self.assertEqual(fetched["api_key_masked"], "****8877")
+
+        # Updating settings with masked placeholder "****1234" must preserve the real stored API key
+        st, _, raw = self._req(
+            adm_op,
+            adm_jar,
+            "PUT",
+            "/api/v1/mat/llm-settings",
+            {
+                "provider": "gemini",
+                "model_name": "gemini-2.5-flash",
+                "api_key": "****1234",
+                "is_enabled": 1,
+            },
+        )
+        self.assertEqual(st, 200)
+        resaved = json.loads(raw.decode("utf-8"))
+        self.assertEqual(resaved["api_key_masked"], "****8877")
+        conn_check = server.get_db()
+        try:
+            unmasked = mat_llm_engine.get_llm_settings(conn_check, mask_secret=False)
+            self.assertEqual(unmasked["api_key"], "AIzaSySecretApiKeyForTesting998877")
+        finally:
+            conn_check.close()
 
         # Non-admin blocked from PUT/POST llm-settings
         self.assertEqual(

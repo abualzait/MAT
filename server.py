@@ -1167,10 +1167,22 @@ class RequestTooLargeError(ValueError):
     """Raised when an incoming HTTP request body exceeds MAX_REQUEST_BYTES."""
 
 
+def _extract_request_path(raw_target):
+    """Extract URL path directly without urlparse() stripping netloc on leading '//'."""
+    target = str(raw_target or '/')
+    path_part = target.split('?', 1)[0].split('#', 1)[0]
+    if re.match(r'^https?://', path_part, re.IGNORECASE):
+        path_part = urllib.parse.urlparse(path_part).path or '/'
+    return path_part or '/'
+
+
 def _normalize_url_path(raw_path):
-    """Decode and normalize a URL path; return (normalized_path, has_traversal)."""
-    decoded = urllib.parse.unquote(raw_path or '/').replace('\\', '/')
-    if '\x00' in decoded:
+    """Decode and normalize a URL path; return (normalized_path, is_suspicious)."""
+    raw_str = str(raw_path or '/')
+    if raw_str.startswith('//') or raw_str.startswith('/\\'):
+        return '/', True
+    decoded = urllib.parse.unquote(raw_str).replace('\\', '/')
+    if '\x00' in decoded or decoded.startswith('//'):
         return '/', True
     collapsed = re.sub(r'/+', '/', decoded)
     if '..' in collapsed.split('/'):
@@ -1285,6 +1297,23 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'SAMEORIGIN')
 
+    def send_response(self, code, message=None):
+        """Reset per-response header state before sending response status line."""
+        self._sec_headers_added = False
+        super().send_response(code, message)
+
+    def end_headers(self):
+        """Ensure security headers are injected once on every response (including super().do_GET)."""
+        if not getattr(self, '_sec_headers_added', False):
+            self._sec_headers_added = True
+            self._send_security_headers()
+        super().end_headers()
+
+    def list_directory(self, path):
+        """Disable directory index listings to prevent filesystem enumeration."""
+        self.send_json({'error': 'الوصول للمجلد غير مسموح'}, 403)
+        return None
+
     def do_OPTIONS(self):
         """Handle CORS preflight OPTIONS requests."""
         self.send_response(200)
@@ -1296,14 +1325,12 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, Authorization, Cookie')
-        self._send_security_headers()
         self.end_headers()
 
     def send_json(self, data, status=200, cookie=None):
         """Send JSON response."""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self._send_security_headers()
         origin = self.headers.get('Origin')
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
@@ -1351,17 +1378,17 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         return parsed
 
     def get_query_params(self):
-        """Parse query string parameters."""
-        parsed = urllib.parse.urlparse(self.path)
-        return dict(urllib.parse.parse_qsl(parsed.query))
+        """Parse query string parameters safely."""
+        query_str = self.path.split('?', 1)[1].split('#', 1)[0] if '?' in self.path else ''
+        return dict(urllib.parse.parse_qsl(query_str))
 
     # ── Routing ───────────────────────────────────────────────
 
     def do_GET(self):
         """Handle GET requests."""
-        raw_path = urllib.parse.urlparse(self.path).path
-        path, has_traversal = _normalize_url_path(raw_path)
-        if has_traversal or _is_blocked_static_path(path, _get_scans_dir()):
+        raw_path = _extract_request_path(self.path)
+        path, is_suspicious = _normalize_url_path(raw_path)
+        if is_suspicious or _is_blocked_static_path(path, _get_scans_dir()):
             self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
             return
 
@@ -1381,7 +1408,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/complaints':
             self.send_response(302)
             self.send_header('Location', '/')
-            self._send_security_headers()
             self.end_headers()
             return
 
@@ -1395,7 +1421,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             if user:
                 self.send_response(302)
                 self.send_header('Location', '/')
-                self._send_security_headers()
                 self.end_headers()
                 return
             self.serve_file('complaints/login.html')
@@ -1421,9 +1446,9 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         """Handle POST requests."""
-        raw_path = urllib.parse.urlparse(self.path).path
-        path, has_traversal = _normalize_url_path(raw_path)
-        if has_traversal:
+        raw_path = _extract_request_path(self.path)
+        path, is_suspicious = _normalize_url_path(raw_path)
+        if is_suspicious:
             self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
             return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
@@ -1438,9 +1463,9 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_PUT(self):
         """Handle PUT requests."""
-        raw_path = urllib.parse.urlparse(self.path).path
-        path, has_traversal = _normalize_url_path(raw_path)
-        if has_traversal:
+        raw_path = _extract_request_path(self.path)
+        path, is_suspicious = _normalize_url_path(raw_path)
+        if is_suspicious:
             self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
             return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
@@ -1455,9 +1480,9 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         """Handle DELETE requests."""
-        raw_path = urllib.parse.urlparse(self.path).path
-        path, has_traversal = _normalize_url_path(raw_path)
-        if has_traversal:
+        raw_path = _extract_request_path(self.path)
+        path, is_suspicious = _normalize_url_path(raw_path)
+        if is_suspicious:
             self.send_json({'error': 'غير مصرح بالوصول لهذا المسار'}, 403)
             return
         if path.startswith('/api/v1/mat/') or path.startswith('/api/'):
@@ -1484,7 +1509,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 mime_type = 'application/octet-stream'
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
-            self._send_security_headers()
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
@@ -1494,7 +1518,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_response(404)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self._send_security_headers()
             self.end_headers()
             self.wfile.write(b'<h1>404 - File Not Found</h1>')
 
@@ -1596,6 +1619,10 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({'error': str(e) or 'حجم الطلب يتجاوز الحد الأقصى المسموح به'}, 413)
                 except PermissionError as e:
                     self.send_json({'error': str(e) or 'ليس لديك صلاحية'}, 403)
+                except (KeyError, IndexError) as e:
+                    safe_err = mat_llm_engine._redact_secret(str(e))
+                    print(f"❌ Error in {path}: {type(e).__name__}: {safe_err}")
+                    self.send_json({'error': 'خطأ داخلي في الخادم'}, 500)
                 except LookupError as e:
                     self.send_json({'error': str(e) or 'غير موجود'}, 404)
                 except ValueError as e:
@@ -1615,7 +1642,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self._send_security_headers()
         self.send_header('Cache-Control', 'public, max-age=86400')
         self.end_headers()
         with open(path, 'rb') as f:
@@ -3636,7 +3662,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Type', mime_type)
         self.send_header('Content-Length', str(len(content)))
         self.send_header('Content-Disposition', f'{disp}; filename="scan_{int(scan_id)}{safe_ext}"')
-        self._send_security_headers()
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(content)
@@ -3662,7 +3687,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         self.send_header('Content-Length', str(len(doc_bytes)))
         self.send_header('Content-Disposition', f'attachment; filename="{safe_num}.docx"')
-        self._send_security_headers()
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(doc_bytes)
@@ -3689,16 +3713,19 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         )
         page_order = mat_complaints_service._clean_opt_int(page_order_raw, 'page_order') or 1
 
+        # Short DB read for complaint verification + LLM settings (do not hold SQLite connection across LLM HTTP call)
         conn = get_db()
-        stored = None
         try:
             if complaint_id is not None:
                 exists = conn.execute("SELECT id FROM mat_complaints WHERE id = ?", (complaint_id,)).fetchone()
                 if not exists:
                     raise LookupError('الشكوى المحددة غير موجودة')
-
-            stored = mat_complaints_service.validate_and_store_scan(file_bytes, filename, _get_scans_dir())
             settings = mat_llm_engine.get_llm_settings(conn, mask_secret=False)
+        finally:
+            conn.close()
+
+        stored = mat_complaints_service.validate_and_store_scan(file_bytes, filename, _get_scans_dir())
+        try:
             llm_res = mat_llm_engine.extract_and_analyze_complaint(file_bytes, stored['mime_type'], settings)
 
             extracted = llm_res.get('extracted') or {}
@@ -3713,27 +3740,31 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 else mat_complaints_service.match_nearest_police_station('', BASE_DIR)
             )
 
-            cur = conn.execute(
-                """
-                INSERT INTO mat_complaint_scans (
-                    complaint_id, stored_filename, original_filename, mime_type,
-                    file_size, page_order, ocr_raw_text, uploaded_by_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    complaint_id,
-                    stored['stored_filename'],
-                    stored['original_filename'],
-                    stored['mime_type'],
-                    stored['file_size'],
-                    page_order,
-                    llm_res.get('raw_text', ''),
-                    user['user_id'],
-                ),
-            )
-            scan_id = int(cur.lastrowid)
-            log_activity(conn, user['user_id'], 'مسح ضوئي لشكوى', 'complaint_scan', scan_id, stored['original_filename'])
-            conn.commit()
+            conn = get_db()
+            try:
+                cur = conn.execute(
+                    """
+                    INSERT INTO mat_complaint_scans (
+                        complaint_id, stored_filename, original_filename, mime_type,
+                        file_size, page_order, ocr_raw_text, uploaded_by_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        complaint_id,
+                        stored['stored_filename'],
+                        stored['original_filename'],
+                        stored['mime_type'],
+                        stored['file_size'],
+                        page_order,
+                        llm_res.get('raw_text', ''),
+                        user['user_id'],
+                    ),
+                )
+                scan_id = int(cur.lastrowid)
+                log_activity(conn, user['user_id'], 'مسح ضوئي لشكوى', 'complaint_scan', scan_id, stored['original_filename'])
+                conn.commit()
+            finally:
+                conn.close()
         except Exception:
             if stored and stored.get('abs_path') and os.path.exists(stored['abs_path']):
                 try:
@@ -3741,8 +3772,6 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 except OSError:
                     pass
             raise
-        finally:
-            conn.close()
 
         backup_db_to_json()
         self.send_json({
@@ -3781,15 +3810,15 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(detail, 201)
 
     def api_update_police_complaint(self, complaint_id):
+        user = self.require_role('officer', 'admin', 'governor')
+        if not user:
+            return
         data = self.read_json_body()
         if (
             isinstance(data, dict)
             and 'followup_action' in data
             and set(data.keys()).issubset({'followup_action', 'action_type', 'notes'})
         ):
-            user = self.require_role('officer', 'admin', 'governor')
-            if not user:
-                return
             conn = get_db()
             try:
                 detail = mat_complaints_service.register_followup(
@@ -3805,8 +3834,8 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(detail)
             return
 
-        user = self.require_role('officer', 'admin')
-        if not user:
+        if user['role'] not in ('officer', 'admin'):
+            self.send_json({'error': 'ليس لديك صلاحية'}, 403)
             return
         conn = get_db()
         try:

@@ -93,8 +93,34 @@ def _redact_secret(text: str, secret: Optional[str] = None) -> str:
     if secret and len(secret) >= 4 and secret in res:
         res = res.replace(secret, "[REDACTED]")
     res = re.sub(r"AIzaSy[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
+    res = re.sub(r"AQ\.[A-Za-z0-9_.-]{15,}", "[REDACTED]", res)
     res = re.sub(r"sk-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     return res
+
+
+def _format_http_error(exc: urllib.error.HTTPError, api_key: str = "") -> str:
+    """Extract concise provider error details from an HTTPError without exposing secrets."""
+    detail = ""
+    try:
+        raw = exc.read()
+        if isinstance(raw, (bytes, bytearray)):
+            raw_text = raw.decode("utf-8", errors="replace").strip()
+            if raw_text:
+                try:
+                    parsed = json.loads(raw_text)
+                    err_obj = parsed.get("error") if isinstance(parsed, dict) else None
+                    if isinstance(err_obj, dict) and err_obj.get("message"):
+                        detail = str(err_obj["message"]).strip()
+                    elif isinstance(parsed, dict) and parsed.get("message"):
+                        detail = str(parsed["message"]).strip()
+                    else:
+                        detail = raw_text[:280]
+                except Exception:
+                    detail = raw_text[:280]
+    except Exception:
+        detail = ""
+    base_msg = f"HTTP {exc.code}: {detail}" if detail else str(exc)
+    return _redact_secret(base_msg, api_key)
 
 
 def get_llm_settings(conn: Any = None, mask_secret: bool = True) -> Dict[str, Any]:
@@ -566,6 +592,17 @@ def extract_and_analyze_complaint(
             "raw_text": raw_text,
             "message": "Extraction and analysis completed successfully",
         }
+    except urllib.error.HTTPError as e:
+        err_msg = _format_http_error(e, api_key)
+        return {
+            "status": "manual_fallback",
+            "provider": provider,
+            "model": model,
+            "extracted": {},
+            "analysis": {},
+            "raw_text": raw_text,
+            "message": f"Extraction error: {err_msg}",
+        }
     except Exception as e:
         err_msg = _redact_secret(str(e), api_key)
         return {
@@ -667,6 +704,13 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": False, "message": f"Unsupported provider: '{provider}'"}
 
         return {"ok": False, "message": f"Unexpected response from provider '{provider}'"}
+    except urllib.error.HTTPError as e:
+        err_msg = _format_http_error(e, api_key)
+        return {
+            "ok": False,
+            "message": f"Connection error: {err_msg}",
+            "provider": provider,
+        }
     except Exception as e:
         err_msg = _redact_secret(str(e), api_key)
         return {

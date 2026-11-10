@@ -637,6 +637,29 @@ class TestLlmEngine(unittest.TestCase):
         self.assertNotIn("SECRET_KEY_1234", res_err["message"])
         self.assertIn("[REDACTED]", res_err["message"])
 
+        # HTTPError body extraction + AQ.* key redaction
+        import io as _io
+        import urllib.error as _uerr
+        http_err = _uerr.HTTPError(
+            url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            code=402,
+            msg="Payment Required",
+            hdrs=None,
+            fp=_io.BytesIO(json.dumps({
+                "error": {
+                    "code": 402,
+                    "message": "Your prepayment credits are depleted for AQ.Ab8RN6JY-bZOOfGOxgr3-TestFakeKey123."
+                }
+            }).encode("utf-8")),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=http_err):
+            res_402 = mat_llm_engine.test_llm_connection(settings)
+        self.assertFalse(res_402["ok"])
+        self.assertIn("402", res_402["message"])
+        self.assertIn("prepayment credits are depleted", res_402["message"])
+        self.assertNotIn("AQ.Ab8RN6JY", res_402["message"])
+        self.assertIn("[REDACTED]", res_402["message"])
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

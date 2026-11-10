@@ -2875,17 +2875,28 @@ input:checked + .slider:before {
 }
 .pc-party-row {
   display: grid;
-  grid-template-columns: 125px 1.2fr 1fr 1fr 1.3fr auto;
-  gap: 0.5rem;
+  grid-template-columns: minmax(115px, 0.9fr) minmax(170px, 1.6fr) minmax(135px, 1.1fr);
+  gap: 0.55rem;
   align-items: center;
-  padding: 0.55rem;
+  padding: 0.65rem;
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
 }
+.pc-party-row .pc-party-phone {
+  grid-column: 1 / 2;
+}
+.pc-party-row .pc-party-address {
+  grid-column: 2 / 3;
+}
+.pc-party-row .pc-party-remove-btn {
+  grid-column: 3 / 4;
+  justify-self: end;
+}
 .pc-party-row .form-control {
   padding: 0.45rem 0.6rem;
   font-size: 0.84rem;
+  min-width: 0;
 }
 
 /* Checkboxes & Station Match & Initial Officer Box */
@@ -3283,6 +3294,11 @@ input:checked + .slider:before {
   .pc-party-row {
     grid-template-columns: 1fr 1fr;
   }
+  .pc-party-row .pc-party-phone,
+  .pc-party-row .pc-party-address,
+  .pc-party-row .pc-party-remove-btn {
+    grid-column: auto;
+  }
   .pc-stats-bar {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3298,6 +3314,9 @@ input:checked + .slider:before {
   }
   .pc-party-row {
     grid-template-columns: 1fr;
+  }
+  .pc-party-row .pc-party-remove-btn {
+    justify-self: start;
   }
   .pc-filter-toolbar {
     flex-direction: column;

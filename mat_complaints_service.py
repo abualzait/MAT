@@ -760,8 +760,18 @@ def _log_workflow_and_activity(
     )
 
 
+def _has_party_update(payload: dict) -> bool:
+    """Return True only when payload provides at least one non-None party collection."""
+    return any(payload.get(k) is not None for k in ("parties", "complainants", "respondents"))
+
+
 def _normalize_parties(payload: dict) -> list[dict]:
     """Normalize parties from payload['parties'] or separate complainants/respondents lists."""
+    for key in ("parties", "complainants", "respondents"):
+        val = payload.get(key)
+        if val is not None and not isinstance(val, list):
+            raise ValueError(f"الحقل {key} يجب أن يكون قائمة")
+
     raw_parties = payload.get("parties")
     combined = []
     if isinstance(raw_parties, list):
@@ -854,52 +864,87 @@ def _first_respondent_address(payload: dict, parties: list[dict]) -> str:
 def _resolve_station_fields(
     payload: dict,
     parties: list[dict],
-    base_dir: str,
+    base_dir: str = None,
     existing: dict = None,
+    allow_clear: bool = True,
 ) -> dict:
-    """Resolve nearest police station fields from explicit payload or respondent address GIS match."""
+    """Resolve nearest police station metadata, clearing stale fields on override, failed rematch, or clear."""
     existing = existing or {}
-    explicit_station = str(payload.get("nearest_station") or "").strip()
-    explicit_dir = str(payload.get("police_directorate") or "").strip()
-    explicit_liwa = str(payload.get("liwa_name") or "").strip()
-    explicit_lat = _clean_opt_float(payload.get("station_lat"), "station_lat") if "station_lat" in payload else None
-    explicit_lon = _clean_opt_float(payload.get("station_lon"), "station_lon") if "station_lon" in payload else None
-
     rematch = _is_truthy(payload.get("rematch_station"))
-    current_station = explicit_station or ("" if rematch else str(existing.get("nearest_station") or "").strip())
+
+    def _present(key: str) -> bool:
+        if key not in payload:
+            return False
+        if allow_clear:
+            return True
+        val = payload.get(key)
+        return val is not None and str(val).strip() != ""
+
+    has_station_key = _present("nearest_station")
+    explicit_station = str(payload.get("nearest_station") or "").strip() if has_station_key else ""
+    existing_station = str(existing.get("nearest_station") or "").strip()
+
+    has_dir_key = _present("police_directorate")
+    has_liwa_key = _present("liwa_name")
+    has_lat_key = _present("station_lat")
+    has_lon_key = _present("station_lon")
+
+    explicit_dir = str(payload.get("police_directorate") or "").strip() if has_dir_key else None
+    explicit_liwa = str(payload.get("liwa_name") or "").strip() if has_liwa_key else None
+    explicit_lat = _clean_opt_float(payload.get("station_lat"), "station_lat") if has_lat_key else None
+    explicit_lon = _clean_opt_float(payload.get("station_lon"), "station_lon") if has_lon_key else None
+
+    station_cleared = allow_clear and has_station_key and not explicit_station and not rematch
+    station_changed = has_station_key and bool(explicit_station) and (explicit_station != existing_station)
 
     matched = {}
-    if not explicit_station and (not current_station or rematch):
+    if not explicit_station and not station_cleared and (rematch or (not existing_station and base_dir)):
         resp_addr = _first_respondent_address(payload, parties)
         if resp_addr and base_dir:
             res = match_nearest_police_station(resp_addr, base_dir)
             if res.get("matched"):
                 matched = res
 
-    nearest_station = explicit_station or matched.get("nearest_station") or current_station
-    police_directorate = (
-        explicit_dir
-        or matched.get("police_directorate")
-        or ("" if rematch and matched else str(existing.get("police_directorate") or "").strip())
-    )
-    liwa_name = (
-        explicit_liwa
-        or matched.get("liwa_name")
-        or ("" if rematch and matched else str(existing.get("liwa_name") or "").strip())
-    )
-    station_lat = explicit_lat if explicit_lat is not None else (
-        matched.get("lat") if matched else existing.get("station_lat")
-    )
-    station_lon = explicit_lon if explicit_lon is not None else (
-        matched.get("lon") if matched else existing.get("station_lon")
-    )
+    if station_cleared:
+        nearest_station = ""
+        stale_reset = True
+    elif has_station_key and explicit_station:
+        nearest_station = explicit_station
+        stale_reset = station_changed
+    elif rematch:
+        nearest_station = matched.get("nearest_station") or ""
+        stale_reset = True
+    elif matched:
+        nearest_station = matched.get("nearest_station") or ""
+        stale_reset = True
+    else:
+        nearest_station = existing_station
+        stale_reset = False
+
+    def _pick_str(has_key: bool, explicit_val, matched_key: str, existing_key: str) -> str:
+        if has_key:
+            return explicit_val or ""
+        if matched:
+            return matched.get(matched_key) or ""
+        if stale_reset:
+            return ""
+        return str(existing.get(existing_key) or "").strip()
+
+    def _pick_coord(has_key: bool, explicit_val, matched_key: str, existing_key: str):
+        if has_key:
+            return explicit_val
+        if matched:
+            return matched.get(matched_key)
+        if stale_reset:
+            return None
+        return existing.get(existing_key)
 
     return {
         "nearest_station": nearest_station,
-        "police_directorate": police_directorate,
-        "liwa_name": liwa_name,
-        "station_lat": station_lat,
-        "station_lon": station_lon,
+        "police_directorate": _pick_str(has_dir_key, explicit_dir, "police_directorate", "police_directorate"),
+        "liwa_name": _pick_str(has_liwa_key, explicit_liwa, "liwa_name", "liwa_name"),
+        "station_lat": _pick_coord(has_lat_key, explicit_lat, "lat", "station_lat"),
+        "station_lon": _pick_coord(has_lon_key, explicit_lon, "lon", "station_lon"),
     }
 
 
@@ -1041,25 +1086,29 @@ def _auto_reserve_complaint_file(conn, complaint: dict, actor_id: int) -> str:
         note_text = f"حجز تلقائي لشكوى: {complaint.get('subject') or ''}".strip()
         if station_info:
             note_text += f" ({station_info})"
+        new_res_id = None
         try:
             cur = conn.execute(
                 "INSERT INTO mat_reserved_files (file_number, officer_id, notes) VALUES (?, ?, ?)",
                 (file_number, target_officer_id, note_text),
             )
-            res_id = int(cur.lastrowid)
-            conn.execute(
-                """
-                INSERT INTO mat_file_custody_log (reserved_file_id, to_officer_id, status, notes)
-                VALUES (?, ?, 'accepted', ?)
-                """,
-                (res_id, target_officer_id, "تسجيل أولي تلقائي بعد قرار الحاكم الإداري"),
-            )
-            created_new = True
+            new_res_id = int(cur.lastrowid)
         except sqlite3.IntegrityError:
             existing_res = conn.execute(
                 "SELECT id FROM mat_reserved_files WHERE file_number = ?",
                 (file_number,),
             ).fetchone()
+            if existing_res is None:
+                raise
+        if new_res_id is not None:
+            conn.execute(
+                """
+                INSERT INTO mat_file_custody_log (reserved_file_id, to_officer_id, status, notes)
+                VALUES (?, ?, 'accepted', ?)
+                """,
+                (new_res_id, target_officer_id, "تسجيل أولي تلقائي بعد قرار الحاكم الإداري"),
+            )
+            created_new = True
 
     conn.execute(
         "UPDATE mat_complaints SET linked_file_number = ?, updated_at = ? WHERE id = ?",
@@ -1087,28 +1136,6 @@ def _ensure_officer_exists(conn, officer_id: int) -> None:
     row = conn.execute("SELECT id FROM mat_officers WHERE id = ?", (int(officer_id),)).fetchone()
     if row is None:
         raise ValueError(f"الضابط المحدد غير موجود (#{officer_id})")
-
-
-def _extract_station_overrides(payload: dict, existing: dict) -> dict:
-    """Extract optional police station override fields, preserving existing values when omitted."""
-    return {
-        "nearest_station": str(payload.get("nearest_station") or "").strip()
-        or (existing.get("nearest_station") or ""),
-        "police_directorate": str(payload.get("police_directorate") or "").strip()
-        or (existing.get("police_directorate") or ""),
-        "liwa_name": str(payload.get("liwa_name") or "").strip()
-        or (existing.get("liwa_name") or ""),
-        "station_lat": (
-            _clean_opt_float(payload.get("station_lat"), "station_lat")
-            if payload.get("station_lat") not in (None, "")
-            else existing.get("station_lat")
-        ),
-        "station_lon": (
-            _clean_opt_float(payload.get("station_lon"), "station_lon")
-            if payload.get("station_lon") not in (None, "")
-            else existing.get("station_lon")
-        ),
-    }
 
 
 def _apply_post_approval_integrations(conn, complaint_id: int, final_action: str, actor_id: int) -> None:
@@ -1472,6 +1499,13 @@ def create_complaint_intake(conn, user: dict, payload: dict, base_dir: str) -> d
     complaint_number = str(payload.get("complaint_number") or "").strip()
     if not complaint_number:
         complaint_number = _generate_unique_complaint_number(conn)
+    else:
+        existing_num = conn.execute(
+            "SELECT 1 FROM mat_complaints WHERE complaint_number = ?",
+            (complaint_number,),
+        ).fetchone()
+        if existing_num is not None:
+            raise ValueError(f"رقم الشكوى مسجل مسبقاً: {complaint_number}")
 
     assigned_officer_id = _clean_opt_int(payload.get("assigned_officer_id"), "assigned_officer_id")
     if assigned_officer_id is None:
@@ -1498,70 +1532,79 @@ def create_complaint_intake(conn, user: dict, payload: dict, base_dir: str) -> d
     last_followup_at = str(payload.get("last_followup_at") or "").strip() or now
     legacy_status = STAGE_TO_STATUS.get(submit_stage, "جديد")
 
-    cur = conn.execute(
-        """
-        INSERT INTO mat_complaints (
-            complaint_number, subject, complaint_type, status, priority, notes,
-            assigned_officer_id, created_by_id, created_at, updated_at,
-            paper_date, complainant_category, respondent_category, summary,
-            has_signature, no_pending_lawsuit_declared, workflow_stage,
-            is_minor_police_complaint,
-            ai_provider, ai_model, ai_extracted_json, ai_analysis,
-            ai_solution_recommendation, ai_recommended_action, ai_confidence,
-            officer_action, officer_notes, officer_reviewed_by_id, officer_reviewed_at,
-            nearest_station, police_directorate, liwa_name, station_lat, station_lon,
-            last_followup_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO mat_complaints (
+                complaint_number, subject, complaint_type, status, priority, notes,
+                assigned_officer_id, created_by_id, created_at, updated_at,
+                paper_date, complainant_category, respondent_category, summary,
+                has_signature, no_pending_lawsuit_declared, workflow_stage,
+                is_minor_police_complaint,
+                ai_provider, ai_model, ai_extracted_json, ai_analysis,
+                ai_solution_recommendation, ai_recommended_action, ai_confidence,
+                officer_action, officer_notes, officer_reviewed_by_id, officer_reviewed_at,
+                nearest_station, police_directorate, liwa_name, station_lat, station_lon,
+                last_followup_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?
+            )
+            """,
+            (
+                complaint_number,
+                subject,
+                str(payload.get("complaint_type") or "عام").strip() or "عام",
+                legacy_status,
+                str(payload.get("priority") or "عادي").strip() or "عادي",
+                str(payload.get("notes") or "").strip(),
+                assigned_officer_id,
+                actor_id,
+                now,
+                now,
+                str(payload.get("paper_date") or "").strip(),
+                complainant_category,
+                respondent_category,
+                str(payload.get("summary") or "").strip(),
+                1 if _is_truthy(payload.get("has_signature")) else 0,
+                1 if _is_truthy(payload.get("no_pending_lawsuit_declared")) else 0,
+                submit_stage,
+                1 if _is_truthy(payload.get("is_minor_police_complaint", True)) else 0,
+                str(payload.get("ai_provider") or "").strip() or None,
+                str(payload.get("ai_model") or "").strip() or None,
+                ai_extracted_json,
+                str(payload.get("ai_analysis") or "").strip() or None,
+                str(payload.get("ai_solution_recommendation") or "").strip() or None,
+                str(payload.get("ai_recommended_action") or "").strip() or None,
+                ai_confidence,
+                officer_action,
+                officer_notes,
+                officer_reviewed_by_id,
+                officer_reviewed_at,
+                station_info["nearest_station"],
+                station_info["police_directorate"],
+                station_info["liwa_name"],
+                station_info["station_lat"],
+                station_info["station_lon"],
+                last_followup_at,
+            ),
         )
-        """,
-        (
-            complaint_number,
-            subject,
-            str(payload.get("complaint_type") or "عام").strip() or "عام",
-            legacy_status,
-            str(payload.get("priority") or "عادي").strip() or "عادي",
-            str(payload.get("notes") or "").strip(),
-            assigned_officer_id,
-            actor_id,
-            now,
-            now,
-            str(payload.get("paper_date") or "").strip(),
-            complainant_category,
-            respondent_category,
-            str(payload.get("summary") or "").strip(),
-            1 if _is_truthy(payload.get("has_signature")) else 0,
-            1 if _is_truthy(payload.get("no_pending_lawsuit_declared")) else 0,
-            submit_stage,
-            1 if _is_truthy(payload.get("is_minor_police_complaint", True)) else 0,
-            str(payload.get("ai_provider") or "").strip() or None,
-            str(payload.get("ai_model") or "").strip() or None,
-            ai_extracted_json,
-            str(payload.get("ai_analysis") or "").strip() or None,
-            str(payload.get("ai_solution_recommendation") or "").strip() or None,
-            str(payload.get("ai_recommended_action") or "").strip() or None,
-            ai_confidence,
-            officer_action,
-            officer_notes,
-            officer_reviewed_by_id,
-            officer_reviewed_at,
-            station_info["nearest_station"],
-            station_info["police_directorate"],
-            station_info["liwa_name"],
-            station_info["station_lat"],
-            station_info["station_lon"],
-            last_followup_at,
-        ),
-    )
+    except sqlite3.IntegrityError as exc:
+        dup = conn.execute(
+            "SELECT 1 FROM mat_complaints WHERE complaint_number = ?",
+            (complaint_number,),
+        ).fetchone()
+        if dup is not None:
+            raise ValueError(f"رقم الشكوى مسجل مسبقاً: {complaint_number}") from exc
+        raise
     complaint_id = int(cur.lastrowid)
 
     _insert_parties(conn, complaint_id, parties)
@@ -1595,10 +1638,11 @@ def update_complaint_details(conn, user: dict, complaint_id: int, payload: dict,
     if current_stage in ("completed", "stopped_90_days"):
         raise ValueError(f"لا يمكن تعديل شكوى مغلقة أو موقوفة ({current_stage})")
 
-    has_party_update = "parties" in payload or "complainants" in payload or "respondents" in payload
+    has_party_update = _has_party_update(payload)
     if has_party_update:
         parties = _normalize_parties(payload)
     else:
+        # Validate types if explicit keys were passed as None (safe) vs invalid non-None already handled
         parties = [
             dict(r)
             for r in conn.execute(
@@ -1632,9 +1676,26 @@ def update_complaint_details(conn, user: dict, complaint_id: int, payload: dict,
             update_map[field] = str(val or "").strip()
 
     # Resolve/re-match station if explicitly requested or station fields passed or missing
-    station_keys = {"nearest_station", "police_directorate", "liwa_name", "station_lat", "station_lon", "rematch_station"}
+    station_keys = {
+        "nearest_station",
+        "police_directorate",
+        "liwa_name",
+        "station_lat",
+        "station_lon",
+        "rematch_station",
+        "respondent_address",
+    }
     if station_keys.intersection(payload.keys()) or (has_party_update and not existing.get("nearest_station")):
-        station_info = _resolve_station_fields(payload, parties, base_dir, existing=existing)
+        should_match_gis = _is_truthy(payload.get("rematch_station")) or (
+            not existing.get("nearest_station") and (has_party_update or "respondent_address" in payload)
+        )
+        station_info = _resolve_station_fields(
+            payload,
+            parties,
+            base_dir=base_dir if should_match_gis else None,
+            existing=existing,
+            allow_clear=True,
+        )
         update_map.update(station_info)
 
     target_stage = current_stage
@@ -1766,7 +1827,7 @@ def record_section_head_recommendation(conn, user: dict, complaint_id: int, payl
     if not sec_notes:
         raise ValueError("مشروحات القسم مطلوبة")
 
-    station = _extract_station_overrides(payload, existing)
+    station = _resolve_station_fields(payload, [], base_dir=None, existing=existing, allow_clear=False)
 
     now = _now_str()
     new_stage = "pending_governor"
@@ -1857,7 +1918,7 @@ def record_governor_decision(conn, user: dict, complaint_id: int, payload: dict)
         final_action = str(payload.get("governor_final_action") or "رفض التنسيب").strip()
         new_stage = "governor_rejected"
 
-    station = _extract_station_overrides(payload, existing)
+    station = _resolve_station_fields(payload, [], base_dir=None, existing=existing, allow_clear=False)
 
     now = _now_str()
     new_status = STAGE_TO_STATUS[new_stage]

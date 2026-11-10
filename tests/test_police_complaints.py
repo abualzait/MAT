@@ -1166,6 +1166,160 @@ class TestComplaintsWorkflow(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_partial_update_null_parties_and_invalid_party_types(self):
+        conn = server.get_db()
+        try:
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "موضوع أولي",
+                "parties": [
+                    {"party_type": "شاكي", "name": "سامر ناصر", "phone": "0791110000", "address": "الشميساني"},
+                    {"party_type": "مشتكى_عليه", "name": "طارق عادل", "phone": "0792220000", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            cid = created["id"]
+            self.assertEqual(len(created["parties"]), 2)
+
+            # Partial update with parties=None / complainants=None / respondents=None MUST preserve existing parties
+            updated = mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "subject": "موضوع محدث جزئياً",
+                "parties": None,
+                "complainants": None,
+                "respondents": None
+            }, self.base_dir)
+            self.assertEqual(updated["subject"], "موضوع محدث جزئياً")
+            self.assertEqual(len(updated["parties"]), 2)
+            self.assertEqual({p["name"] for p in updated["parties"]}, {"سامر ناصر", "طارق عادل"})
+
+            # Non-list non-None party collections raise ValueError
+            with self.assertRaises(ValueError):
+                mat_complaints_service.update_complaint_details(conn, self.officer, cid, {"parties": "not-a-list"}, self.base_dir)
+            with self.assertRaises(ValueError):
+                mat_complaints_service.update_complaint_details(conn, self.officer, cid, {"complainants": {"name": "خطأ"}}, self.base_dir)
+            with self.assertRaises(ValueError):
+                mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                    "subject": "اختبار أطراف غير صالحة",
+                    "respondents": "invalid"
+                }, self.base_dir)
+        finally:
+            conn.close()
+
+    def test_station_override_failed_rematch_and_explicit_clear_prevent_stale_metadata(self):
+        conn = server.get_db()
+        try:
+            created = mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "subject": "شكوى اختبار المركز الأمني",
+                "parties": [
+                    {"party_type": "مشتكى_عليه", "name": "محل الروابي", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            cid = created["id"]
+            self.assertIn("تلاع العلي", created["nearest_station"])
+            self.assertTrue(created["police_directorate"])
+            self.assertTrue(created["liwa_name"])
+            self.assertIsNotNone(created["station_lat"])
+            self.assertIsNotNone(created["station_lon"])
+
+            # 1. Explicit coordinate clearing in update_complaint_details
+            cleared_coords = mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "station_lat": None,
+                "station_lon": "",
+                "police_directorate": ""
+            }, self.base_dir)
+            self.assertIn("تلاع العلي", cleared_coords["nearest_station"])
+            self.assertEqual(cleared_coords["police_directorate"], "")
+            self.assertIsNone(cleared_coords["station_lat"])
+            self.assertIsNone(cleared_coords["station_lon"])
+
+            # Restore via rematch to تلاع العلي
+            rematched = mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "rematch_station": True
+            }, self.base_dir)
+            self.assertTrue(rematched["police_directorate"])
+            self.assertIsNotNone(rematched["station_lat"])
+
+            # 2. Failed rematch_station=True with unknown address clears ALL 5 station fields
+            failed_rematch = mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "rematch_station": True,
+                "parties": [
+                    {"party_type": "مشتكى_عليه", "name": "محل الروابي", "address": "منطقة_وهمية_غير_موجودة_xyz"}
+                ]
+            }, self.base_dir)
+            self.assertEqual(failed_rematch["nearest_station"], "")
+            self.assertEqual(failed_rematch["police_directorate"], "")
+            self.assertEqual(failed_rematch["liwa_name"], "")
+            self.assertIsNone(failed_rematch["station_lat"])
+            self.assertIsNone(failed_rematch["station_lon"])
+
+            # Restore via matching address then manually override nearest_station alone -> clears stale metadata
+            mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "rematch_station": True,
+                "parties": [
+                    {"party_type": "مشتكى_عليه", "name": "محل الروابي", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            overridden = mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "nearest_station": "مركز أمن مخصص"
+            }, self.base_dir)
+            self.assertEqual(overridden["nearest_station"], "مركز أمن مخصص")
+            self.assertEqual(overridden["police_directorate"], "")
+            self.assertEqual(overridden["liwa_name"], "")
+            self.assertIsNone(overridden["station_lat"])
+            self.assertIsNone(overridden["station_lon"])
+
+            # Section head overriding to another station with explicit directorate also clears stale coords/liwa
+            mat_complaints_service.update_complaint_details(conn, self.officer, cid, {
+                "rematch_station": True,
+                "parties": [
+                    {"party_type": "مشتكى_عليه", "name": "محل الروابي", "address": "تلاع العلي"}
+                ]
+            }, self.base_dir)
+            sec_overridden = mat_complaints_service.record_section_head_recommendation(conn, self.admin, cid, {
+                "section_head_notes": "تحويل لمركز أمن البيادر",
+                "section_recommended_action": "توديع عن طريق مركز أمني",
+                "nearest_station": "مركز أمن البيادر"
+            })
+            self.assertEqual(sec_overridden["nearest_station"], "مركز أمن البيادر")
+            self.assertEqual(sec_overridden["police_directorate"], "")
+            self.assertEqual(sec_overridden["liwa_name"], "")
+            self.assertIsNone(sec_overridden["station_lat"])
+            self.assertIsNone(sec_overridden["station_lon"])
+        finally:
+            conn.close()
+
+    def test_duplicate_complaint_number_raises_value_error_and_unrelated_integrity_not_swallowed(self):
+        conn = server.get_db()
+        try:
+            mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                "complaint_number": "PC-20261110-9901",
+                "subject": "شكوى أصلية"
+            }, self.base_dir)
+
+            # Duplicate explicit complaint_number raises ValueError (not IntegrityError)
+            with self.assertRaises(ValueError):
+                mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                    "complaint_number": "PC-20261110-9901",
+                    "subject": "شكوى مكررة"
+                }, self.base_dir)
+
+            # Even if UNIQUE index exists at DB level and check is bypassed, IntegrityError maps to ValueError
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_test_unique_cn ON mat_complaints(complaint_number)")
+            conn.commit()
+            with self.assertRaises(ValueError):
+                mat_complaints_service.create_complaint_intake(conn, self.officer, {
+                    "complaint_number": "PC-20261110-9901",
+                    "subject": "شكوى مكررة ثانية"
+                }, self.base_dir)
+
+            # Unrelated IntegrityError in _auto_reserve_complaint_file (nonexistent officer_id FK) must not be swallowed
+            with self.assertRaises(sqlite3.IntegrityError):
+                mat_complaints_service._auto_reserve_complaint_file(
+                    conn,
+                    {"id": 999, "complaint_number": "PC-20261110-9999", "subject": "تست", "assigned_officer_id": 999999},
+                    999999,
+                )
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

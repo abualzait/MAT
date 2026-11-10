@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import sqlite3
@@ -6,10 +7,14 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+import zipfile
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 from unittest import mock
 
 import server
 import mat_llm_engine
+import mat_complaints_service
 
 
 
@@ -611,6 +616,146 @@ class TestLlmEngine(unittest.TestCase):
         self.assertFalse(res_err["ok"])
         self.assertNotIn("SECRET_KEY_1234", res_err["message"])
         self.assertIn("[REDACTED]", res_err["message"])
+
+
+class TestComplaintsUtilities(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.scans_dir = os.path.join(self.tmpdir.name, "complaint_scans")
+        os.makedirs(self.scans_dir, exist_ok=True)
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_normalize_arabic(self):
+        raw = "أحمد إبراهيم آمنة مُحَمَّد، هبة ومصطفى؛ شارع 14؟"
+        norm = mat_complaints_service.normalize_arabic(raw)
+        self.assertEqual(norm, "احمد ابراهيم امنه محمد هبه ومصطفي شارع 14")
+
+    def test_validate_and_store_scan_rejects_spoofed_and_oversized_files(self):
+        # Spoofed .jpg containing HTML script
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(b"<script>alert(1)</script>", "evil.jpg", self.scans_dir)
+
+        # Path traversal attempt in resolve_scan_path
+        with self.assertRaises(ValueError):
+            mat_complaints_service.resolve_scan_path("../server.py", self.scans_dir)
+
+        with self.assertRaises(ValueError):
+            mat_complaints_service.resolve_scan_path("..\\server.py", self.scans_dir)
+
+        # Empty file
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(b"", "empty.png", self.scans_dir)
+
+        # Oversized file (> 10MB)
+        oversized = b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024 + 1)
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(oversized, "huge.png", self.scans_dir)
+
+        # Valid PNG magic bytes
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        meta_png = mat_complaints_service.validate_and_store_scan(png_bytes, "../../scan 01.png", self.scans_dir)
+        self.assertTrue(meta_png["stored_filename"].endswith(".png"))
+        self.assertNotIn("..", meta_png["stored_filename"])
+        self.assertEqual(meta_png["mime_type"], "image/png")
+        resolved_png = mat_complaints_service.resolve_scan_path(meta_png["stored_filename"], self.scans_dir)
+        self.assertTrue(os.path.isfile(resolved_png))
+
+        # Valid JPEG magic bytes
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+        meta_jpg = mat_complaints_service.validate_and_store_scan(jpeg_bytes, "doc.jpg", self.scans_dir)
+        self.assertTrue(meta_jpg["stored_filename"].endswith(".jpg"))
+        self.assertEqual(meta_jpg["mime_type"], "image/jpeg")
+
+        # Valid WEBP magic bytes
+        webp_bytes = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 32
+        meta_webp = mat_complaints_service.validate_and_store_scan(webp_bytes, "doc.webp", self.scans_dir)
+        self.assertTrue(meta_webp["stored_filename"].endswith(".webp"))
+        self.assertEqual(meta_webp["mime_type"], "image/webp")
+
+        # Valid PDF magic bytes
+        pdf_bytes = b"%PDF-1.5 test document"
+        meta_pdf = mat_complaints_service.validate_and_store_scan(pdf_bytes, "complaint.pdf", self.scans_dir)
+        self.assertTrue(meta_pdf["stored_filename"].endswith(".pdf"))
+        self.assertEqual(meta_pdf["mime_type"], "application/pdf")
+
+    def test_match_nearest_police_station_from_amman_areas(self):
+        res = mat_complaints_service.match_nearest_police_station("عمان - تلاع العلي قرب الدوار", self.base_dir)
+        self.assertTrue(res["matched"])
+        self.assertIn("تلاع العلي", res["nearest_station"])
+        self.assertTrue(res["police_directorate"])
+        self.assertTrue(res["liwa_name"])
+        self.assertGreater(len(res["candidates"]), 0)
+
+        # Empty or unknown location
+        res_empty = mat_complaints_service.match_nearest_police_station("", self.base_dir)
+        self.assertFalse(res_empty["matched"])
+        self.assertEqual(res_empty["nearest_station"], "")
+
+    def test_compute_90_day_status(self):
+        # 92 days ago -> expired / due for stop
+        old_date = (datetime.now() - timedelta(days=92)).strftime("%Y-%m-%d %H:%M:%S")
+        res = mat_complaints_service.compute_90_day_status(old_date, "governor_approved")
+        self.assertTrue(res["is_due_for_stop"])
+        self.assertEqual(res["days_remaining"], 0)
+        self.assertEqual(res["warning_level"], "expired")
+
+        # Fresh complaint (today) -> normal
+        today_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        res_today = mat_complaints_service.compute_90_day_status(today_date, "under_review")
+        self.assertFalse(res_today["is_due_for_stop"])
+        self.assertGreaterEqual(res_today["days_remaining"], 89)
+        self.assertEqual(res_today["warning_level"], "normal")
+
+        # 80 days ago -> warning
+        warn_date = (datetime.now() - timedelta(days=80)).strftime("%Y-%m-%d %H:%M:%S")
+        res_warn = mat_complaints_service.compute_90_day_status(warn_date, "officer_reviewed")
+        self.assertFalse(res_warn["is_due_for_stop"])
+        self.assertEqual(res_warn["warning_level"], "warning")
+        self.assertLessEqual(res_warn["days_remaining"], 15)
+
+        # Already stopped or closed complaint
+        res_closed = mat_complaints_service.compute_90_day_status(old_date, "closed")
+        self.assertFalse(res_closed["is_due_for_stop"])
+        self.assertEqual(res_closed["warning_level"], "closed")
+
+        res_stopped = mat_complaints_service.compute_90_day_status(old_date, "stopped")
+        self.assertFalse(res_stopped["is_due_for_stop"])
+        self.assertEqual(res_stopped["warning_level"], "closed")
+
+    def test_export_complaint_docx_populates_template_text(self):
+        template = os.path.join(self.base_dir, "complaint_form_editable.docx")
+        detail = {
+            "complaint": {
+                "complaint_number": "PC-20261110-0001",
+                "paper_date": "2026-11-10",
+                "subject": "إغلاق مدخل عمارة",
+                "summary": "قام المشتكى عليه بإغلاق المدخل بسيارته.",
+                "officer_action": "اتصال هاتفي",
+                "officer_notes": "تم التحقق من العنوان",
+                "section_head_notes": "يرجى التوديع للمركز الأمني المختص",
+                "section_recommended_action": "توديع عن طريق مركز أمني",
+                "governor_decision": "موافقة",
+                "governor_final_action": "توديع عن طريق مركز أمني",
+                "governor_notes": "لا مانع حسب الأصول",
+                "nearest_station": "مركز أمن تلاع العلي",
+                "police_directorate": "مديرية شرطة شمال عمان"
+            },
+            "parties": [
+                {"party_type": "شاكي", "party_category": "مواطن", "name": "خالد محمود", "national_id": "9901012345", "phone": "0795551111", "address": "تلاع العلي"},
+                {"party_type": "مشتكى_عليه", "party_category": "منشأة", "name": "كراج الأمل", "national_id": "", "phone": "0798882222", "address": "تلاع العلي"}
+            ]
+        }
+        docx_bytes = mat_complaints_service.export_complaint_docx(detail, template)
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+            xml_text = zf.read("word/document.xml").decode("utf-8")
+        self.assertIn("خالد محمود", xml_text)
+        self.assertIn("كراج الأمل", xml_text)
+        self.assertIn("إغلاق مدخل عمارة", xml_text)
+        self.assertIn("يرجى التوديع للمركز الأمني المختص", xml_text)
+        self.assertIn("مركز أمن تلاع العلي", xml_text)
 
 
 if __name__ == "__main__":

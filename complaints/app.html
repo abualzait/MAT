@@ -732,7 +732,7 @@
                                     <div class="form-row">
                                         <div class="form-group mb-0">
                                             <label for="pcNearestStation">المركز الأمني الأقرب</label>
-                                            <input type="text" id="pcNearestStation" class="form-control" placeholder="يُحدد تلقائياً أو أدخله يدوياً...">
+                                            <input type="text" id="pcNearestStation" class="form-control" list="pcStationsDatalist" placeholder="يُحدد تلقائياً أو أدخله يدوياً...">
                                         </div>
                                         <div class="form-group mb-0">
                                             <label for="pcPoliceDirectorate">مديرية الشرطة</label>
@@ -1104,7 +1104,7 @@
                     <span id="pcDetailStageBadge" class="badge badge-blue">—</span>
                     <span id="pcDetail90DayBadge" class="badge badge-green">0 / 90 يوم</span>
                 </div>
-                <button type="button" class="modal-close" style="color:#fff;" onclick="closeModal('modalPoliceComplaintDetail')">&times;</button>
+                <button type="button" class="modal-close pc-no-print" style="color:#fff;" onclick="closeModal('modalPoliceComplaintDetail')">&times;</button>
             </div>
             <div class="modal-body pc-detail-body">
                 <div class="pc-detail-split">

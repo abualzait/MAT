@@ -3336,19 +3336,30 @@ input:checked + .slider:before {
   body.pc-printing .modal-overlay:not(#modalPoliceComplaintDetail) {
     display: none !important;
   }
+  body.pc-printing .modal-overlay {
+    overflow: visible !important;
+    max-height: none !important;
+  }
   body.pc-printing #modalPoliceComplaintDetail {
     position: static !important;
     display: block !important;
     background: #FFFFFF !important;
     padding: 0 !important;
     overflow: visible !important;
+    max-height: none !important;
   }
   body.pc-printing .pc-detail-modal {
+    display: block !important;
+    overflow: visible !important;
     max-width: 100% !important;
     width: 100% !important;
     max-height: none !important;
     box-shadow: none !important;
     border: none !important;
+  }
+  body.pc-printing .pc-detail-modal .modal-body {
+    overflow: visible !important;
+    max-height: none !important;
   }
   body.pc-printing .pc-detail-modal-header {
     background: #FFFFFF !important;

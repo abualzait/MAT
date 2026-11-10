@@ -1735,13 +1735,6 @@ async function performSearch(query) {
 
             complaintsList.forEach(c => {
                 const tr = document.createElement('tr');
-                tr.style.cursor = 'pointer';
-                tr.addEventListener('click', () => {
-                    closeSearchResults();
-                    if (typeof openPoliceComplaintDetail === 'function') {
-                        openPoliceComplaintDetail(Number(c.id));
-                    }
-                });
 
                 const tdNum = document.createElement('td');
                 const strongNum = document.createElement('strong');
@@ -1969,7 +1962,7 @@ let onlineUsersInterval = null;
 let currentPollController = null;
 
 async function toggleChatPane(forceOpen = false) {
-    if (currentUser && currentUser.role !== 'admin' && !(currentUser.accessible_tools || '').includes('chat')) {
+    if (currentUser && currentUser.role !== 'admin' && !parseToolsList(currentUser.accessible_tools).includes('chat')) {
         showToast('ليس لديك صلاحية الوصول لغرفة الاجتماعات (المحادثة)', true);
         return;
     }

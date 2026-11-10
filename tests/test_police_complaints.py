@@ -9,7 +9,7 @@ import unittest
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import server
@@ -701,6 +701,29 @@ class TestComplaintsUtilities(unittest.TestCase):
         self.assertTrue(meta_pdf["stored_filename"].endswith(".pdf"))
         self.assertEqual(meta_pdf["mime_type"], "application/pdf")
 
+        # Disallowed extension with valid PNG magic bytes
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(png_bytes, "malware.exe", self.scans_dir)
+
+        # Mismatched extension (.pdf with PNG magic bytes)
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(png_bytes, "document.pdf", self.scans_dir)
+
+        # Mismatched extension (.png with PDF magic bytes)
+        with self.assertRaises(ValueError):
+            mat_complaints_service.validate_and_store_scan(pdf_bytes, "document.png", self.scans_dir)
+
+    def test_atomic_file_storage_and_no_leftover_tmp_files(self):
+        png_data = b"\x89PNG\r\n\x1a\n" + b"TEST_PAYLOAD_ATOMIC_12345"
+        meta = mat_complaints_service.validate_and_store_scan(png_data, "upload.png", self.scans_dir)
+        self.assertTrue(os.path.isfile(meta["abs_path"]))
+        with open(meta["abs_path"], "rb") as f:
+            self.assertEqual(f.read(), png_data)
+
+        # Verify no .tmp files exist in scans_dir
+        tmp_files = [f for f in os.listdir(self.scans_dir) if f.endswith(".tmp")]
+        self.assertEqual(tmp_files, [])
+
     def test_match_nearest_police_station_from_amman_areas(self):
         res = mat_complaints_service.match_nearest_police_station("عمان - تلاع العلي قرب الدوار", self.base_dir)
         self.assertTrue(res["matched"])
@@ -744,6 +767,19 @@ class TestComplaintsUtilities(unittest.TestCase):
         res_stopped = mat_complaints_service.compute_90_day_status(old_date, "stopped")
         self.assertFalse(res_stopped["is_due_for_stop"])
         self.assertEqual(res_stopped["warning_level"], "closed")
+
+        # ISO 8601 with Z timezone 95 days ago -> expired / due for stop
+        iso_z_date = (datetime.now(timezone.utc) - timedelta(days=95)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        res_iso_z = mat_complaints_service.compute_90_day_status(iso_z_date, "governor_approved")
+        self.assertTrue(res_iso_z["is_due_for_stop"])
+        self.assertEqual(res_iso_z["days_remaining"], 0)
+        self.assertEqual(res_iso_z["warning_level"], "expired")
+
+        # ISO 8601 with timezone offset (+03:00) 10 days ago -> normal
+        iso_offset_date = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%S+03:00")
+        res_iso_offset = mat_complaints_service.compute_90_day_status(iso_offset_date, "governor_approved")
+        self.assertFalse(res_iso_offset["is_due_for_stop"])
+        self.assertEqual(res_iso_offset["warning_level"], "normal")
 
     def test_export_complaint_docx_populates_template_text(self):
         template = os.path.join(self.base_dir, "complaint_form_editable.docx")

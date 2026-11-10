@@ -12,11 +12,12 @@ import io
 import json
 import os
 import re
+import tempfile
 import textwrap
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ── CONFIGURATION & CONSTANTS ────────────────────────────────────────────────
@@ -28,6 +29,14 @@ ALLOWED_MAGIC = [
     (b"\x89PNG\r\n\x1a\n", "image/png", ".png"),
     (b"%PDF-", "application/pdf", ".pdf"),
 ]
+
+ALLOWED_EXT_TO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -89,6 +98,16 @@ def validate_and_store_scan(raw_bytes: bytes, original_filename: str, scans_dir:
     if not clean_orig:
         clean_orig = f"scan_{uuid.uuid4().hex[:8]}{ext}"
 
+    # Extension allow-list and magic-type consistency check
+    orig_ext = os.path.splitext(clean_orig)[1].lower()
+    if orig_ext:
+        if orig_ext not in ALLOWED_EXT_TO_MIME:
+            raise ValueError(f"امتداد الملف غير مسموح به ({orig_ext})")
+        if ALLOWED_EXT_TO_MIME[orig_ext] != mime_type:
+            raise ValueError(f"امتداد الملف ({orig_ext}) لا يطابق محتوى الملف الحقيقي ({mime_type})")
+    else:
+        clean_orig = f"{clean_orig}{ext}"
+
     # Generate secure UUID filename
     stored_filename = f"{uuid.uuid4().hex}{ext}"
 
@@ -99,8 +118,22 @@ def validate_and_store_scan(raw_bytes: bytes, original_filename: str, scans_dir:
     if not target_path.startswith(real_scans_dir + os.sep):
         raise ValueError("مسار حفظ غير آمن")
 
-    with open(target_path, "wb") as f:
-        f.write(raw_bytes)
+    # Atomic write via temporary file inside same directory
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=real_scans_dir, delete=False, suffix=".tmp") as tmp_f:
+            tmp_path = tmp_f.name
+            tmp_f.write(raw_bytes)
+            tmp_f.flush()
+            os.fsync(tmp_f.fileno())
+        os.replace(tmp_path, target_path)
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
     return {
         "stored_filename": stored_filename,
@@ -256,21 +289,34 @@ def match_nearest_police_station(address: str, base_dir: str) -> dict:
 def compute_90_day_status(last_followup_at: str, workflow_stage: str) -> dict:
     """
     Calculate the elapsed days from the last follow-up date and determine the 90-day status.
+    Supports ISO 8601 timestamps (including 'Z' and timezone offsets) and standard SQLite dates.
     Returns: days_elapsed, days_remaining, is_due_for_stop, warning_level
     """
     is_closed = str(workflow_stage or "").lower() in ("closed", "stopped", "archived", "governor_rejected")
 
     dt = None
     if last_followup_at:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
-            try:
-                dt = datetime.strptime(str(last_followup_at).strip(), fmt)
-                break
-            except (ValueError, TypeError):
-                continue
+        s = str(last_followup_at).strip()
+        # Try ISO 8601 first (handles Z, offsets +HH:MM, and standard T format)
+        try:
+            iso_s = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(iso_s)
+        except (ValueError, TypeError):
+            # Fallback to standard formats
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                try:
+                    dt = datetime.strptime(s, fmt)
+                    break
+                except (ValueError, TypeError):
+                    continue
 
     if dt:
-        elapsed = max(0, (datetime.now() - dt).days)
+        if dt.tzinfo is not None:
+            now = datetime.now(timezone.utc)
+            elapsed = max(0, (now - dt).days)
+        else:
+            now = datetime.now()
+            elapsed = max(0, (now - dt).days)
     else:
         elapsed = 0
 

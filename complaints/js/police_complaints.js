@@ -69,11 +69,27 @@
         lastAiResult: null,
         isScanning: false,
         isSavingIntake: false,
+        isSubmittingOfficerAction: false,
+        isSubmittingSectionHead: false,
+        isSubmittingGovernor: false,
+        isSubmittingFollowup: false,
+        isSavingLlmSettings: false,
+        isTestingLlmSettings: false,
         stationsLoaded: false,
         stationsDirectory: new Map(),
         officersLoaded: false,
+        officersPromise: null,
+        pendingAssignedOfficerId: null,
         officersList: [],
         llmSettingsMeta: { provider: 'gemini', api_key_configured: false, is_enabled: true },
+        listRequestSeq: 0,
+        detailRequestSeq: 0,
+        stationMatchSeq: 0,
+        listAbortController: null,
+        detailAbortController: null,
+        stationMatchAbortController: null,
+        printCleanupTimer: null,
+        printCleanupHandler: null,
         searchDebounceTimer: null,
         stationMatchTimer: null,
         deepLinkHandled: false
@@ -149,10 +165,6 @@
     }
 
     function pcToast(message, isError = false) {
-        if (typeof global.showToast === 'function') {
-            global.showToast(String(message || ''), Boolean(isError));
-            return;
-        }
         const container = $('toastContainer');
         if (!container) return;
         const toast = createEl('div', { className: `toast ${isError ? 'toast-error' : ''}` }, [
@@ -164,6 +176,12 @@
             toast.style.opacity = '0';
             setTimeout(() => toast.remove(), 300);
         }, 6000);
+    }
+
+    function findButtonByOnclick(container, fnName) {
+        if (!container) return null;
+        const buttons = Array.from(container.querySelectorAll('button') || []);
+        return buttons.find((b) => String((b.getAttribute && b.getAttribute('onclick')) || '').includes(fnName)) || null;
     }
 
     function pcOpenModal(modalId) {
@@ -322,31 +340,50 @@
     async function ensureOfficersLoaded() {
         const select = $('pcAssignedOfficerId');
         if (!select) return;
-        if (state.officersLoaded && select.options.length > 1) return;
-        try {
-            const res = await fetch('/api/v1/mat/officers');
-            if (!res.ok) return;
-            const data = await res.json();
-            const officers = (data.officers || data.mat_officers || []).filter(
-                (o) => o && o.is_active && (o.role === 'officer' || o.role === 'admin')
-            );
-            state.officersList = officers;
-            const currentVal = select.value;
-            const frag = document.createDocumentFragment();
-            frag.appendChild(createEl('option', { value: '', textContent: 'أنا (المستخدم الحالي)' }));
-            officers.forEach((o) => {
-                const roleLabel = o.role === 'admin' ? 'رئيس قسم' : 'ضابط';
-                frag.appendChild(createEl('option', {
-                    value: String(o.id),
-                    textContent: `${o.name} (${roleLabel})`
-                }));
-            });
-            select.replaceChildren(frag);
-            if (currentVal) setSelectValueIfOptionExists(select, currentVal);
-            state.officersLoaded = true;
-        } catch (_) {
-            // Non-fatal
+        if (state.officersLoaded && select.options.length > 1) {
+            if (state.pendingAssignedOfficerId !== null) {
+                setSelectValueIfOptionExists(select, state.pendingAssignedOfficerId);
+            }
+            return;
         }
+        if (state.officersPromise) {
+            return state.officersPromise;
+        }
+
+        state.officersPromise = (async () => {
+            try {
+                const res = await fetch('/api/v1/mat/officers');
+                if (!res.ok) return;
+                const data = await res.json();
+                const officers = (data.officers || data.mat_officers || []).filter(
+                    (o) => o && o.is_active && (o.role === 'officer' || o.role === 'admin')
+                );
+                state.officersList = officers;
+                const currentVal = select.value;
+                const frag = document.createDocumentFragment();
+                frag.appendChild(createEl('option', { value: '', textContent: 'أنا (المستخدم الحالي)' }));
+                officers.forEach((o) => {
+                    const roleLabel = o.role === 'admin' ? 'رئيس قسم' : 'ضابط';
+                    frag.appendChild(createEl('option', {
+                        value: String(o.id),
+                        textContent: `${o.name} (${roleLabel})`
+                    }));
+                });
+                select.replaceChildren(frag);
+                const desiredVal = state.pendingAssignedOfficerId !== null
+                    ? state.pendingAssignedOfficerId
+                    : currentVal;
+                if (desiredVal) setSelectValueIfOptionExists(select, desiredVal);
+                else select.value = '';
+                state.officersLoaded = true;
+            } catch (_) {
+                // Non-fatal
+            } finally {
+                state.officersPromise = null;
+            }
+        })();
+
+        return state.officersPromise;
     }
 
     function getFirstRespondentAddressFromForm() {
@@ -363,10 +400,20 @@
     async function matchStationByAddress(address, options = {}) {
         const cleanAddr = String(address || '').trim();
         if (!cleanAddr) return null;
+        const reqSeq = ++state.stationMatchSeq;
+        if (state.stationMatchAbortController) {
+            try { state.stationMatchAbortController.abort(); } catch (_) {}
+        }
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        state.stationMatchAbortController = controller;
+
         try {
-            const res = await fetch(`/api/v1/mat/police-complaints/match-station?address=${encodeURIComponent(cleanAddr)}`);
+            const fetchOpts = controller ? { signal: controller.signal } : {};
+            const res = await fetch(`/api/v1/mat/police-complaints/match-station?address=${encodeURIComponent(cleanAddr)}`, fetchOpts);
+            if (reqSeq !== state.stationMatchSeq) return null;
             if (!res.ok) return null;
             const data = await res.json();
+            if (reqSeq !== state.stationMatchSeq) return null;
             if (data && data.matched) {
                 applyStationMatchToIntakeForm(data);
                 if (options.notify) {
@@ -376,11 +423,18 @@
                 pcToast('لم يتم العثور على مطابقة دقيقة في الدليل — يمكنك اختيار المركز يدوياً', true);
             }
             return data;
-        } catch (_) {
+        } catch (err) {
+            if ((err && err.name === 'AbortError') || reqSeq !== state.stationMatchSeq) {
+                return null;
+            }
             if (options.notify) {
                 pcToast('تعذر الاتصال بخدمة تحديد أقرب مركز أمني', true);
             }
             return null;
+        } finally {
+            if (state.stationMatchAbortController === controller) {
+                state.stationMatchAbortController = null;
+            }
         }
     }
 
@@ -739,7 +793,10 @@
         }
 
         const isMinor = analysis.is_minor_police_complaint !== false;
-        const confPct = Math.round(Number(analysis.ai_confidence || 0.8) * 100);
+        const rawConfidence = (analysis.ai_confidence !== null && analysis.ai_confidence !== undefined && analysis.ai_confidence !== '')
+            ? Number(analysis.ai_confidence)
+            : 0.8;
+        const confPct = Math.round((Number.isFinite(rawConfidence) ? rawConfidence : 0.8) * 100);
 
         box.appendChild(createEl('div', {
             style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }
@@ -898,10 +955,16 @@
         try {
             const dataUrl = await readFileAsDataUrl(file);
             const editingId = String($('pcEditingComplaintId')?.value || '').trim();
+            const fileSig = `${file.name}:${file.size}:${file.lastModified || 0}`;
+            const existingSigIdx = state.uploadedScans.findIndex((s) => s.fileSig === fileSig);
+            const pageOrder = existingSigIdx !== -1
+                ? (state.uploadedScans[existingSigIdx].page_order || existingSigIdx + 1)
+                : (state.uploadedScans.length + 1);
+
             const payload = {
                 filename: normalizeScanFilename(file),
                 file_base64: dataUrl,
-                page_order: state.uploadedScans.length + 1
+                page_order: pageOrder
             };
             if (editingId) payload.complaint_id = Number(editingId);
 
@@ -920,7 +983,6 @@
             }
 
             if (data.scan_id) {
-                const fileSig = `${file.name}:${file.size}:${file.lastModified || 0}`;
                 const scanObj = data.scan || {
                     id: data.scan_id,
                     original_filename: payload.filename,
@@ -928,6 +990,7 @@
                     url: `/api/v1/mat/police-complaints/scans/${data.scan_id}`
                 };
                 scanObj.fileSig = fileSig;
+                scanObj.page_order = pageOrder;
 
                 const existingIdx = state.uploadedScans.findIndex((s) => s.fileSig === fileSig || s.id === scanObj.id);
                 if (existingIdx !== -1) {
@@ -939,6 +1002,7 @@
                 }
                 state.uploadedScanIds = state.uploadedScans.map((s) => s.id);
                 renderIntakePreview();
+                revokeLocalPreviewUrl();
             }
 
             state.lastAiResult = data;
@@ -969,12 +1033,17 @@
         const form = $('formPoliceComplaintIntake');
         if (form) form.reset();
         if ($('pcEditingComplaintId')) $('pcEditingComplaintId').value = '';
+        if ($('pcComplaintNumber')) $('pcComplaintNumber').readOnly = false;
+        if ($('pcIntakeOfficerBox')) $('pcIntakeOfficerBox').style.display = '';
+        if ($('pcSaveDraftBtn')) $('pcSaveDraftBtn').style.display = '';
+        if ($('pcSubmitSectionHeadBtn')) $('pcSubmitSectionHeadBtn').textContent = '📤 حفظ وإرسال لرئيس القسم';
         if ($('pcStationLat')) $('pcStationLat').value = '';
         if ($('pcStationLon')) $('pcStationLon').value = '';
         if ($('pcScanFileInput')) $('pcScanFileInput').value = '';
         if ($('pcCameraFileInput')) $('pcCameraFileInput').value = '';
 
         state.pendingScanFile = null;
+        state.pendingAssignedOfficerId = null;
         revokeLocalPreviewUrl();
         state.uploadedScans = [];
         state.uploadedScanIds = [];
@@ -1019,14 +1088,25 @@
         }
     }
 
-    function loadComplaintIntoIntakeForm(detail) {
+    async function loadComplaintIntoIntakeForm(detail) {
         if (!detail) return;
         resetIntakeForm();
         toggleScannerIntakePanel(true);
 
-        if ($('pcEditingComplaintId')) $('pcEditingComplaintId').value = String(detail.id);
+        const targetIdStr = String(detail.id);
+        const desiredOfficerVal = detail.assigned_officer_id ? String(detail.assigned_officer_id) : '';
+        state.pendingAssignedOfficerId = desiredOfficerVal;
+
+        if ($('pcEditingComplaintId')) $('pcEditingComplaintId').value = targetIdStr;
         if ($('pcPaperDate')) $('pcPaperDate').value = normalizeDateForInput(detail.paper_date || '');
-        if ($('pcComplaintNumber')) $('pcComplaintNumber').value = detail.complaint_number || '';
+        if ($('pcComplaintNumber')) {
+            $('pcComplaintNumber').value = detail.complaint_number || '';
+            $('pcComplaintNumber').readOnly = true;
+        }
+        if ($('pcIntakeOfficerBox')) $('pcIntakeOfficerBox').style.display = 'none';
+        if ($('pcSaveDraftBtn')) $('pcSaveDraftBtn').style.display = 'none';
+        if ($('pcSubmitSectionHeadBtn')) $('pcSubmitSectionHeadBtn').textContent = '💾 حفظ التعديلات';
+
         if ($('pcSubject')) $('pcSubject').value = detail.subject || '';
         if ($('pcSummary')) $('pcSummary').value = detail.summary || '';
         if ($('pcHasSignature')) $('pcHasSignature').checked = Boolean(detail.has_signature);
@@ -1043,15 +1123,12 @@
         if ($('pcStationLat')) $('pcStationLat').value = detail.station_lat != null ? String(detail.station_lat) : '';
         if ($('pcStationLon')) $('pcStationLon').value = detail.station_lon != null ? String(detail.station_lon) : '';
 
-        setSelectValueIfOptionExists($('pcIntakeOfficerAction'), detail.officer_action || '');
-        setSelectValueIfOptionExists($('pcAssignedOfficerId'), detail.assigned_officer_id ? String(detail.assigned_officer_id) : '');
-        if ($('pcIntakeOfficerNotes')) $('pcIntakeOfficerNotes').value = detail.officer_notes || '';
-
         if (Array.isArray(detail.scans) && detail.scans.length > 0) {
             state.uploadedScans = detail.scans.map((s) => ({
                 id: s.id,
                 original_filename: s.original_filename,
                 mime_type: s.mime_type,
+                page_order: s.page_order,
                 url: `/api/v1/mat/police-complaints/scans/${s.id}`
             }));
             state.uploadedScanIds = state.uploadedScans.map((s) => s.id);
@@ -1060,6 +1137,11 @@
         }
 
         setExtractionStatus(`تحرير الشكوى ${detail.complaint_number || `#${detail.id}`}`, 'badge-purple');
+
+        await ensureOfficersLoaded();
+        if (String($('pcEditingComplaintId')?.value || '') === targetIdStr) {
+            setSelectValueIfOptionExists($('pcAssignedOfficerId'), desiredOfficerVal);
+        }
     }
 
     async function submitComplaintIntake(requestedStage) {
@@ -1070,6 +1152,13 @@
             pcToast('موضوع الشكوى مطلوب', true);
             $('pcSubject')?.focus();
             return;
+        }
+
+        const editingId = String($('pcEditingComplaintId')?.value || '').trim();
+        const isEditing = Boolean(editingId);
+
+        if (state.officersPromise) {
+            await state.officersPromise;
         }
 
         const complainants = collectPartiesFromContainer('pcComplainantsList', 'شاكي');
@@ -1086,7 +1175,6 @@
 
         const payload = {
             paper_date: String($('pcPaperDate')?.value || '').trim(),
-            complaint_number: String($('pcComplaintNumber')?.value || '').trim(),
             subject,
             summary: String($('pcSummary')?.value || '').trim(),
             complainants,
@@ -1096,12 +1184,16 @@
             nearest_station: String($('pcNearestStation')?.value || '').trim(),
             police_directorate: String($('pcPoliceDirectorate')?.value || '').trim(),
             liwa_name: String($('pcLiwaName')?.value || '').trim(),
-            officer_action: officerAction,
-            officer_notes: officerNotes,
             assigned_officer_id: assignedVal ? Number(assignedVal) : null,
-            scan_ids: state.uploadedScanIds.slice(),
-            submit_stage: submitStage
+            scan_ids: state.uploadedScanIds.slice()
         };
+
+        if (!isEditing) {
+            payload.complaint_number = String($('pcComplaintNumber')?.value || '').trim();
+            payload.officer_action = officerAction;
+            payload.officer_notes = officerNotes;
+            payload.submit_stage = submitStage;
+        }
 
         const latRaw = String($('pcStationLat')?.value || '').trim();
         const lonRaw = String($('pcStationLon')?.value || '').trim();
@@ -1124,11 +1216,10 @@
             }
         }
 
-        const editingId = String($('pcEditingComplaintId')?.value || '').trim();
-        const url = editingId
+        const url = isEditing
             ? `/api/v1/mat/police-complaints/${encodeURIComponent(editingId)}`
             : '/api/v1/mat/police-complaints';
-        const method = editingId ? 'PUT' : 'POST';
+        const method = isEditing ? 'PUT' : 'POST';
 
         state.isSavingIntake = true;
         const draftBtn = $('pcSaveDraftBtn');
@@ -1149,9 +1240,11 @@
             }
 
             pcToast(
-                submitStage === 'pending_section_head'
-                    ? `تم حفظ الشكوى (${data.complaint_number || ''}) وإرسالها لرئيس القسم`
-                    : `تم حفظ مسودة الشكوى (${data.complaint_number || ''}) بنجاح`
+                isEditing
+                    ? `تم تحديث بيانات الشكوى (${data.complaint_number || ''}) بنجاح`
+                    : (submitStage === 'pending_section_head'
+                        ? `تم حفظ الشكوى (${data.complaint_number || ''}) وإرسالها لرئيس القسم`
+                        : `تم حفظ مسودة الشكوى (${data.complaint_number || ''}) بنجاح`)
             );
 
             resetIntakeForm();
@@ -1390,7 +1483,15 @@
 
     async function loadPoliceComplaintsTab() {
         initPoliceComplaintsBindings();
+        const reqSeq = ++state.listRequestSeq;
+        if (state.listAbortController) {
+            try { state.listAbortController.abort(); } catch (_) {}
+        }
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        state.listAbortController = controller;
+
         const user = await ensureCurrentUser();
+        if (reqSeq !== state.listRequestSeq) return;
         const role = getUserRole(user);
 
         // Ensure role-restricted header controls reflect authenticated role
@@ -1421,8 +1522,11 @@
         params.set('limit', '100');
 
         try {
-            const res = await fetch(`/api/v1/mat/police-complaints?${params.toString()}`);
+            const fetchOpts = controller ? { signal: controller.signal } : {};
+            const res = await fetch(`/api/v1/mat/police-complaints?${params.toString()}`, fetchOpts);
+            if (reqSeq !== state.listRequestSeq) return;
             const data = await readJsonSafe(res);
+            if (reqSeq !== state.listRequestSeq) return;
             if (!res.ok) {
                 if (container) {
                     container.replaceChildren(createEl('div', {
@@ -1438,12 +1542,19 @@
             updateStatsCounters(state.stats);
             syncActiveKpiPill();
             renderComplaintsList(state.complaints, user);
-        } catch (_) {
+        } catch (err) {
+            if ((err && err.name === 'AbortError') || reqSeq !== state.listRequestSeq) {
+                return;
+            }
             if (container) {
                 container.replaceChildren(createEl('div', {
                     className: 'text-center text-error p-3',
                     textContent: 'خطأ في الاتصال بالخادم أثناء جلب الشكاوى'
                 }));
+            }
+        } finally {
+            if (state.listAbortController === controller) {
+                state.listAbortController = null;
             }
         }
     }
@@ -1455,16 +1566,33 @@
         if (bar) bar.remove();
     }
 
-    function renderDetailScanPane(scans) {
+    function renderDetailScanPane(scans, user) {
         const preview = $('pcDetailScanPreview');
+        const zoomBtn = $('pcDetailZoomBtn');
+        const role = getUserRole(user || pcGetSavedUserSync());
+        const canViewScans = role === 'officer' || role === 'admin' || role === 'governor';
+
+        if (!canViewScans) {
+            if (zoomBtn) zoomBtn.style.display = 'none';
+            if (preview) {
+                preview.replaceChildren(createEl('div', {
+                    className: 'pc-preview-empty',
+                    textContent: '🔒 معاينة الوثائق الممسوحة غير متاحة لهذا الدور'
+                }));
+            }
+            return;
+        }
+
         if (!preview) return;
         preview.replaceChildren();
 
         if (!Array.isArray(scans) || scans.length === 0) {
+            if (zoomBtn) zoomBtn.style.display = 'none';
             preview.appendChild(createEl('div', { className: 'pc-preview-empty', textContent: 'لا توجد وثيقة مرفقة' }));
             return;
         }
 
+        if (zoomBtn) zoomBtn.style.display = 'inline-flex';
         const idx = Math.max(0, Math.min(state.detailActiveScanIndex, scans.length - 1));
         state.detailActiveScanIndex = idx;
         const activeScan = scans[idx];
@@ -1481,7 +1609,7 @@
                     textContent: `صفحة ${i + 1}`,
                     onClick: () => {
                         state.detailActiveScanIndex = i;
-                        renderDetailScanPane(scans);
+                        renderDetailScanPane(scans, user);
                     }
                 }));
             });
@@ -1503,6 +1631,12 @@
     }
 
     function openScanLightbox() {
+        const role = getUserRole(pcGetSavedUserSync());
+        const canViewScans = role === 'officer' || role === 'admin' || role === 'governor';
+        if (!canViewScans) {
+            pcToast('غير مصرح بعرض الوثائق الممسوحة لهذا الدور', true);
+            return;
+        }
         const detail = state.currentDetail;
         const scans = (detail && detail.scans) || [];
         if (scans.length === 0) {
@@ -1828,23 +1962,23 @@
             }
         }
 
-        // 4. Footer buttons visibility & state
+        // 4. Footer buttons visibility & state (fail-closed)
         const isClosed = stage === 'completed' || stage === 'stopped_90_days';
-        const isCaller = role === 'caller';
+        const canManage = role === 'officer' || role === 'admin' || role === 'governor';
         const followupBtn = $('pcFollowupBtn');
         const stop90Btn = $('pcStop90Btn');
         const exportBtn = $('pcExportDocxBtn');
 
         if (followupBtn) {
-            followupBtn.style.display = isCaller ? 'none' : 'inline-flex';
-            followupBtn.disabled = isClosed || stage === 'governor_rejected';
+            followupBtn.style.display = canManage ? 'inline-flex' : 'none';
+            followupBtn.disabled = !canManage || isClosed || stage === 'governor_rejected';
         }
         if (stop90Btn) {
-            stop90Btn.style.display = isCaller ? 'none' : 'inline-flex';
-            stop90Btn.disabled = isClosed;
+            stop90Btn.style.display = canManage ? 'inline-flex' : 'none';
+            stop90Btn.disabled = !canManage || isClosed;
         }
         if (exportBtn) {
-            exportBtn.style.display = isCaller ? 'none' : 'inline-flex';
+            exportBtn.style.display = canManage ? 'inline-flex' : 'none';
         }
     }
 
@@ -1873,6 +2007,9 @@
             if (stage === 'stopped_90_days') {
                 badge90.className = 'badge badge-red';
                 badge90.textContent = '⛔ كف طلب (90 يوماً)';
+            } else if (stage === 'governor_rejected') {
+                badge90.className = 'badge badge-red';
+                badge90.textContent = `❌ مرفوضة (${elapsed} يوم)`;
             } else if (stage === 'completed') {
                 badge90.className = 'badge badge-green';
                 badge90.textContent = `✅ منجزة (${elapsed} يوم)`;
@@ -1889,7 +2026,7 @@
         }
 
         state.detailActiveScanIndex = 0;
-        renderDetailScanPane(detail.scans || []);
+        renderDetailScanPane(detail.scans || [], user);
         renderDetailSummaryBlock(detail, user);
         configureRoleActionPanels(detail, user);
         renderWorkflowTimeline(detail.workflow_log || []);
@@ -1897,17 +2034,24 @@
 
     async function openPoliceComplaintDetail(id) {
         initPoliceComplaintsBindings();
-        const user = await ensureCurrentUser();
-        ensureStationsDatalistLoaded();
+        const reqSeq = ++state.detailRequestSeq;
+        if (state.detailAbortController) {
+            try { state.detailAbortController.abort(); } catch (_) {}
+        }
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        state.detailAbortController = controller;
+
         hideStop90ConfirmBar();
 
         const summaryBlock = $('pcDetailSummaryBlock');
         const scanPreview = $('pcDetailScanPreview');
+        const zoomBtn = $('pcDetailZoomBtn');
         const timeline = $('pcWorkflowLogContainer');
 
         if ($('pcOfficerActionPanel')) $('pcOfficerActionPanel').style.display = 'none';
         if ($('pcSectionHeadPanel')) $('pcSectionHeadPanel').style.display = 'none';
         if ($('pcGovernorDecisionPanel')) $('pcGovernorDecisionPanel').style.display = 'none';
+        if (zoomBtn) zoomBtn.style.display = 'none';
 
         if (summaryBlock) {
             summaryBlock.replaceChildren(createEl('div', { className: 'text-center p-3' }, [
@@ -1920,9 +2064,26 @@
 
         pcOpenModal('modalPoliceComplaintDetail');
 
+        const user = await ensureCurrentUser();
+        if (reqSeq !== state.detailRequestSeq) return;
+        ensureStationsDatalistLoaded();
+
+        const initRole = getUserRole(user);
+        if (initRole === 'caller' || !['officer', 'admin', 'governor'].includes(initRole)) {
+            if (scanPreview) {
+                scanPreview.replaceChildren(createEl('div', {
+                    className: 'pc-preview-empty',
+                    textContent: '🔒 معاينة الوثائق الممسوحة غير متاحة لهذا الدور'
+                }));
+            }
+        }
+
         try {
-            const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(id)}`);
+            const fetchOpts = controller ? { signal: controller.signal } : {};
+            const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(id)}`, fetchOpts);
+            if (reqSeq !== state.detailRequestSeq) return;
             const data = await readJsonSafe(res);
+            if (reqSeq !== state.detailRequestSeq) return;
             if (!res.ok) {
                 if (summaryBlock) {
                     summaryBlock.replaceChildren(createEl('div', {
@@ -1934,7 +2095,10 @@
                 return;
             }
             renderComplaintDetail(data, user);
-        } catch (_) {
+        } catch (err) {
+            if ((err && err.name === 'AbortError') || reqSeq !== state.detailRequestSeq) {
+                return;
+            }
             if (summaryBlock) {
                 summaryBlock.replaceChildren(createEl('div', {
                     className: 'text-center text-error p-3',
@@ -1942,10 +2106,15 @@
                 }));
             }
             pcToast('تعذر الاتصال بالخادم', true);
+        } finally {
+            if (state.detailAbortController === controller) {
+                state.detailAbortController = null;
+            }
         }
     }
 
     async function submitOfficerAction() {
+        if (state.isSubmittingOfficerAction) return;
         const detail = state.currentDetail;
         if (!detail) return;
         const user = await ensureCurrentUser();
@@ -1971,6 +2140,10 @@
             payload.send_to_section_head = Boolean($('pcOfficerSendToSectionHead')?.checked);
         }
 
+        const submitBtn = findButtonByOnclick($('pcOfficerActionPanel'), 'submitOfficerAction');
+        state.isSubmittingOfficerAction = true;
+        if (submitBtn) submitBtn.disabled = true;
+
         try {
             const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(detail.id)}/officer-action`, {
                 method: 'POST',
@@ -1987,6 +2160,9 @@
             loadPoliceComplaintsTab();
         } catch (_) {
             pcToast('خطأ في الاتصال بالخادم', true);
+        } finally {
+            state.isSubmittingOfficerAction = false;
+            if (submitBtn) submitBtn.disabled = false;
         }
     }
 
@@ -2016,6 +2192,7 @@
     }
 
     async function submitSectionHeadRecommend() {
+        if (state.isSubmittingSectionHead) return;
         const detail = state.currentDetail;
         if (!detail) return;
         const user = await ensureCurrentUser();
@@ -2045,6 +2222,10 @@
             detail
         );
 
+        const submitBtn = findButtonByOnclick($('pcSectionHeadPanel'), 'submitSectionHeadRecommend');
+        state.isSubmittingSectionHead = true;
+        if (submitBtn) submitBtn.disabled = true;
+
         try {
             const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(detail.id)}/section-recommend`, {
                 method: 'POST',
@@ -2061,10 +2242,14 @@
             loadPoliceComplaintsTab();
         } catch (_) {
             pcToast('خطأ في الاتصال بالخادم', true);
+        } finally {
+            state.isSubmittingSectionHead = false;
+            if (submitBtn) submitBtn.disabled = false;
         }
     }
 
     async function submitGovernorDecision() {
+        if (state.isSubmittingGovernor) return;
         const detail = state.currentDetail;
         if (!detail) return;
         const user = await ensureCurrentUser();
@@ -2095,6 +2280,10 @@
             detail
         );
 
+        const submitBtn = findButtonByOnclick($('pcGovernorDecisionPanel'), 'submitGovernorDecision');
+        state.isSubmittingGovernor = true;
+        if (submitBtn) submitBtn.disabled = true;
+
         try {
             const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(detail.id)}/governor-decision`, {
                 method: 'POST',
@@ -2122,12 +2311,25 @@
             loadPoliceComplaintsTab();
         } catch (_) {
             pcToast('خطأ في الاتصال بالخادم', true);
+        } finally {
+            state.isSubmittingGovernor = false;
+            if (submitBtn) submitBtn.disabled = false;
         }
     }
 
     // ── 90-Day Follow-up, Inline Stop Confirmation, DOCX Export & Print ──────
 
-    async function executeFollowupRequest(complaintId, actionType, notes) {
+    async function executeFollowupRequest(complaintId, actionType, notes, triggerBtn = null) {
+        if (state.isSubmittingFollowup) return false;
+        state.isSubmittingFollowup = true;
+
+        const followupBtn = $('pcFollowupBtn');
+        const stop90Btn = $('pcStop90Btn');
+        if (followupBtn) followupBtn.disabled = true;
+        if (stop90Btn) stop90Btn.disabled = true;
+        if (triggerBtn) triggerBtn.disabled = true;
+
+        let succeeded = false;
         const user = await ensureCurrentUser();
         try {
             const res = await fetch(`/api/v1/mat/police-complaints/${encodeURIComponent(complaintId)}/followup`, {
@@ -2140,6 +2342,7 @@
                 pcToast(data.error || 'تعذر تنفيذ إجراء المتابعة', true);
                 return false;
             }
+            succeeded = true;
             renderComplaintDetail(data, user);
             pcToast(
                 actionType === 'stop_90_days'
@@ -2151,16 +2354,23 @@
         } catch (_) {
             pcToast('خطأ في الاتصال بالخادم', true);
             return false;
+        } finally {
+            state.isSubmittingFollowup = false;
+            if (triggerBtn) triggerBtn.disabled = false;
+            if (!succeeded && state.currentDetail) {
+                configureRoleActionPanels(state.currentDetail, user);
+            }
         }
     }
 
     async function registerComplaintFollowup(actionType) {
+        if (state.isSubmittingFollowup) return;
         const detail = state.currentDetail;
         if (!detail) return;
 
         if (actionType !== 'stop_90_days') {
             hideStop90ConfirmBar();
-            await executeFollowupRequest(detail.id, 'followup', '');
+            await executeFollowupRequest(detail.id, 'followup', '', $('pcFollowupBtn'));
             return;
         }
 
@@ -2200,7 +2410,7 @@
 
         const confirmBtn = createEl('button', {
             type: 'button',
-            id: 'pcConfirmStop90ActionBtn',
+            id: 'pcStopConfirmSubmitBtn',
             className: 'btn btn-sm',
             style: { background: '#DC2626', color: '#FFFFFF', border: '1px solid #B91C1C' },
             textContent: '⛔ تأكيد كف الطلب نهائياً',
@@ -2212,7 +2422,11 @@
                     return;
                 }
                 confirmBtn.disabled = true;
-                await executeFollowupRequest(detail.id, 'stop_90_days', noteVal);
+                try {
+                    await executeFollowupRequest(detail.id, 'stop_90_days', noteVal, confirmBtn);
+                } finally {
+                    confirmBtn.disabled = false;
+                }
             }
         });
 
@@ -2287,12 +2501,29 @@
 
     function printComplaintOfficialSheet() {
         if (!state.currentDetail) return;
+        if (state.printCleanupTimer) {
+            clearTimeout(state.printCleanupTimer);
+            state.printCleanupTimer = null;
+        }
+        if (state.printCleanupHandler) {
+            global.removeEventListener('afterprint', state.printCleanupHandler);
+            state.printCleanupHandler = null;
+        }
         const cleanup = () => {
             document.body.classList.remove('pc-printing');
+            if (state.printCleanupTimer) {
+                clearTimeout(state.printCleanupTimer);
+                state.printCleanupTimer = null;
+            }
+            if (state.printCleanupHandler) {
+                global.removeEventListener('afterprint', state.printCleanupHandler);
+                state.printCleanupHandler = null;
+            }
         };
+        state.printCleanupHandler = cleanup;
         document.body.classList.add('pc-printing');
         global.addEventListener('afterprint', cleanup, { once: true });
-        setTimeout(cleanup, 3000);
+        state.printCleanupTimer = setTimeout(cleanup, 3000);
         global.print();
     }
 
@@ -2389,8 +2620,13 @@
     }
 
     async function saveLlmSettings() {
+        if (state.isSavingLlmSettings) return;
         const payload = buildLlmSettingsPayload();
         if (!payload) return;
+
+        const saveBtn = findButtonByOnclick($('modalLlmSettings'), 'saveLlmSettings');
+        state.isSavingLlmSettings = true;
+        if (saveBtn) saveBtn.disabled = true;
 
         try {
             const res = await fetch('/api/v1/mat/llm-settings', {
@@ -2416,12 +2652,20 @@
         } catch (_) {
             renderLlmTestResult(false, '❌ تعذر الاتصال بالخادم');
             pcToast('خطأ في الاتصال بالخادم', true);
+        } finally {
+            state.isSavingLlmSettings = false;
+            if (saveBtn) saveBtn.disabled = false;
         }
     }
 
     async function testLlmSettings() {
+        if (state.isTestingLlmSettings) return;
         const payload = buildLlmSettingsPayload();
         if (!payload) return;
+
+        const testBtn = findButtonByOnclick($('modalLlmSettings'), 'testLlmSettings');
+        state.isTestingLlmSettings = true;
+        if (testBtn) testBtn.disabled = true;
 
         const box = $('llmTestResultBox');
         if (box) {
@@ -2453,6 +2697,9 @@
         } catch (_) {
             renderLlmTestResult(false, '❌ تعذر الاتصال بالخادم');
             pcToast('خطأ في الاتصال بالخادم', true);
+        } finally {
+            state.isTestingLlmSettings = false;
+            if (testBtn) testBtn.disabled = false;
         }
     }
 
@@ -2538,6 +2785,7 @@
         if (scanFileInput) {
             scanFileInput.addEventListener('change', (ev) => {
                 const file = ev.target.files && ev.target.files[0];
+                ev.target.value = '';
                 if (file) handleSelectedScanFile(file, { autoExtract: true });
             });
         }
@@ -2546,6 +2794,7 @@
         if (cameraInput) {
             cameraInput.addEventListener('change', (ev) => {
                 const file = ev.target.files && ev.target.files[0];
+                ev.target.value = '';
                 if (file) handleSelectedScanFile(file, { autoExtract: true });
             });
         }

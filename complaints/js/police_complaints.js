@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.2${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.3${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -756,6 +756,85 @@
         });
     }
 
+    async function getJpegExifOrientation(file) {
+        try {
+            const name = String(file.name || '').toLowerCase();
+            const mime = String(file.type || '').toLowerCase();
+            if (mime !== 'image/jpeg' && !name.endsWith('.jpg') && !name.endsWith('.jpeg')) {
+                return 1;
+            }
+            const buf = await file.slice(0, 65536).arrayBuffer();
+            const view = new DataView(buf);
+            if (view.byteLength < 4 || view.getUint16(0, false) !== 0xFFD8) return 1;
+            let offset = 2;
+            while (offset + 4 <= view.byteLength) {
+                const marker = view.getUint16(offset, false);
+                offset += 2;
+                if (marker === 0xFFE1 && offset + 8 <= view.byteLength) {
+                    if (view.getUint32(offset + 2, false) !== 0x45786966) return 1;
+                    const tiffStart = offset + 8;
+                    if (tiffStart + 8 > view.byteLength) return 1;
+                    const little = view.getUint16(tiffStart, false) === 0x4949;
+                    const ifdOffset = view.getUint32(tiffStart + 4, little);
+                    const dirStart = tiffStart + ifdOffset;
+                    if (dirStart + 2 > view.byteLength) return 1;
+                    const entries = view.getUint16(dirStart, little);
+                    for (let i = 0; i < entries; i++) {
+                        const entry = dirStart + 2 + i * 12;
+                        if (entry + 10 > view.byteLength) break;
+                        if (view.getUint16(entry, little) === 0x0112) {
+                            return view.getUint16(entry + 8, little) || 1;
+                        }
+                    }
+                    return 1;
+                }
+                if ((marker & 0xFF00) !== 0xFF00) break;
+                if (offset + 2 > view.byteLength) break;
+                offset += view.getUint16(offset, false);
+            }
+        } catch (_err) {
+            return 1;
+        }
+        return 1;
+    }
+
+    async function prepareScanUploadDataUrl(file) {
+        const mime = String(file.type || '').toLowerCase();
+        const isPdf = mime === 'application/pdf' || String(file.name || '').toLowerCase().endsWith('.pdf');
+        if (isPdf || typeof createImageBitmap !== 'function') {
+            return readFileAsDataUrl(file);
+        }
+
+        try {
+            const orientation = await getJpegExifOrientation(file);
+            const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+            const maxDim = Math.max(bitmap.width || 0, bitmap.height || 0);
+            const MAX_EDGE = 2400;
+
+            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 2500000) {
+                bitmap.close?.();
+                return readFileAsDataUrl(file);
+            }
+
+            const scale = maxDim > MAX_EDGE ? (MAX_EDGE / maxDim) : 1;
+            const outW = Math.max(1, Math.round(bitmap.width * scale));
+            const outH = Math.max(1, Math.round(bitmap.height * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = outW;
+            canvas.height = outH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                bitmap.close?.();
+                return readFileAsDataUrl(file);
+            }
+            ctx.drawImage(bitmap, 0, 0, outW, outH);
+            bitmap.close?.();
+            return canvas.toDataURL('image/jpeg', 0.93);
+        } catch (_err) {
+            return readFileAsDataUrl(file);
+        }
+    }
+
     function renderAiAnalysisBox(scanResponse, isPdfFile) {
         const box = $('pcAiAnalysisBox');
         if (!box) return;
@@ -832,6 +911,32 @@
                 document.createTextNode(f.value)
             ]));
         });
+
+        const rawTranscript = String((scanResponse && scanResponse.extracted && scanResponse.extracted.raw_transcription) || '').trim();
+        if (rawTranscript) {
+            const detailsEl = createEl('details', {
+                style: { marginTop: '0.35rem', fontSize: '0.8rem' }
+            }, [
+                createEl('summary', {
+                    style: { cursor: 'pointer', fontWeight: '700', color: 'var(--text-secondary)' },
+                    textContent: '📝 النص الخام المفرّغ من الوثيقة (للمطابقة)'
+                }),
+                createEl('div', {
+                    style: {
+                        whiteSpace: 'pre-wrap',
+                        marginTop: '0.35rem',
+                        padding: '0.5rem 0.65rem',
+                        borderRadius: '8px',
+                        background: 'rgba(255, 255, 255, 0.72)',
+                        border: '1px solid var(--border-color)',
+                        lineHeight: '1.6',
+                        color: 'var(--text-primary)'
+                    },
+                    textContent: rawTranscript
+                })
+            ]);
+            box.appendChild(detailsEl);
+        }
 
         const recAction = String(analysis.ai_recommended_action || '').trim();
         if (recAction) {
@@ -953,7 +1058,7 @@
         }
 
         try {
-            const dataUrl = await readFileAsDataUrl(file);
+            const dataUrl = await prepareScanUploadDataUrl(file);
             const editingId = String($('pcEditingComplaintId')?.value || '').trim();
             const fileSig = `${file.name}:${file.size}:${file.lastModified || 0}`;
             const existingSigIdx = state.uploadedScans.findIndex((s) => s.fileSig === fileSig);

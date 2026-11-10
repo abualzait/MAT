@@ -1,6 +1,15 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.2)
+## Current Features (Version 1.46.3)
+
+### التحديث v1.46.3 (رفع دقة قراءة النصوص العربية للشكاوى، التفريغ الحرفي `raw_transcription`، التدقيق ثنائي المراحل، وتوجيه OpenRouter الذكي)
+1. **رفع دقة محرك الرؤية ومنع التحريف (`mat_llm_engine.py`):**
+   - إرسال الصور بدقة `"detail": "high"` و`temperature: 0.0` و`max_tokens: 4096` مع إلزام النموذج بتفريغ أسطر الورقة حرفياً داخل `raw_transcription` أولاً، وتوضيح خريطة استمارة الشكوى الأردنية وقواعد عدم الاختراع أو التخمين، وتطبيع الأرقام العربية/الهندية (`_normalize_arabic_digits`).
+   - توجيه OpenRouter المجاني عبر سلسلة احتياطية متخصصة (`google/gemma-4-31b-it:free` ثم `google/gemma-4-26b-a4b-it:free` ثم `dots-studio/dots-3-note-preview:free`) بدلاً من `nvidia/nemotron-3.5-super-vl:free` الضعيف في الخط العربي، مع ضبط `reasoning.enabled=false` لنموذج الوثائق ومنع نفاد التوكنز.
+2. **تدقيق النصوص العربية وحماية الأرقام المستخرجة:**
+   - إضافة طبقة تصحيح لغوي ثنائية المرحلة (`_repair_mixed_script_ocr_json`) تعمل تلقائياً فقط عند تسرب كلمات أجنبية/غير عربية داخل الحقول المستخرجة عبر `nvidia/nemotron-3-ultra-550b-a55b:free` مع قفل الأرقام الوطنية والهواتف والتواريخ (`_lock_verified_digits`) لضمان عدم تعديل أي رقم.
+3. **تحسينات واجهة المسح الضوئي (`police_complaints.js` و`app.html`):**
+   - تطبيع اتجاه صور الكاميرا تلقائياً عبر EXIF (`prepareScanUploadDataUrl`) دون فقدان وضوح المستندات عالية الدقة، وإظهار النص الخام المفرّغ (`raw_transcription`) للمطابقة داخل بطاقة التحليل.
 
 ### التحديث v1.46.2 (التحقق الفعلي من استجابة JSON لفحص الاتصال ودعم نماذج الرؤية الحرة بدون `response_format`)
 1. **تشديد فحص الاتصال (`test_llm_connection`):**

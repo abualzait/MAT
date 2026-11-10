@@ -26,6 +26,19 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         cls.orig_db = server.DB_PATH
         cls.orig_backup = server.BACKUP_JSON_PATH
         cls.orig_scans = getattr(server, "SCANS_DIR", None)
+        cls.orig_llm_env = {
+            k: os.environ.get(k)
+            for k in (
+                "MAT_LLM_PROVIDER",
+                "MAT_LLM_MODEL",
+                "MAT_GEMINI_API_KEY",
+                "MAT_OPENAI_API_KEY",
+                "MAT_OPENAI_BASE_URL",
+                "MAT_OLLAMA_URL",
+            )
+        }
+        for k in cls.orig_llm_env:
+            os.environ.pop(k, None)
 
         server.DB_PATH = os.path.join(cls.tmpdir.name, "api_test.db")
         server.BACKUP_JSON_PATH = os.path.join(cls.tmpdir.name, "api_backup.json")
@@ -47,6 +60,11 @@ class TestPoliceComplaintsApi(unittest.TestCase):
             server.SCANS_DIR = cls.orig_scans
         elif hasattr(server, "SCANS_DIR"):
             delattr(server, "SCANS_DIR")
+        for k, val in cls.orig_llm_env.items():
+            if val is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = val
         cls.tmpdir.cleanup()
 
     def _new_client(self):

@@ -698,6 +698,87 @@ class TestLlmEngine(unittest.TestCase):
         self.assertEqual(res_rf["extracted"]["subject"], "شكوى اختبار")
         self.assertIn("response_format", sent_payloads[0])
         self.assertNotIn("response_format", sent_payloads[1])
+        self.assertEqual(sent_payloads[0]["temperature"], 0.0)
+        self.assertEqual(sent_payloads[0]["messages"][0]["content"][1]["image_url"]["detail"], "high")
+        self.assertIn("google/gemma-4-31b-it:free", sent_payloads[0]["models"])
+
+    def test_openrouter_free_routing_and_mixed_script_repair_digit_lock(self):
+        # Known-weak nemotron-3.5-super-vl:free gets routed via reliable vision fallback chain
+        candidates = mat_llm_engine._resolve_openrouter_vision_models("nvidia/nemotron-3.5-super-vl:free")
+        self.assertEqual(candidates[0], "google/gemma-4-31b-it:free")
+        self.assertIn("dots-studio/dots-3-note-preview:free", candidates)
+
+        # Normalize converts Eastern Arabic numerals and clears unreadable placeholders
+        ext, _ana = mat_llm_engine._normalize_complaint_result(
+            {
+                "raw_transcription": "سطر أول",
+                "paper_date": "٢٠٢٦/١١/١٠",
+                "complainants": [
+                    {"party_category": "مواطن", "name": "سالم", "national_id": "٩٨٥١٠٤٢٨١٧", "phone": "٠٧٩٥٤١٢٨٩٠", "address": "عمان"},
+                    {"party_category": "مواطن", "name": "[غير واضح]", "national_id": "", "phone": "", "address": "غير واضح"},
+                ],
+                "respondents": [],
+                "subject": "إغلاق كراج",
+                "summary": "شكوى",
+            }
+        )
+        self.assertEqual(ext["raw_transcription"], "سطر أول")
+        self.assertEqual(ext["paper_date"], "2026/11/10")
+        self.assertEqual(len(ext["complainants"]), 1)
+        self.assertEqual(ext["complainants"][0]["national_id"], "9851042817")
+        self.assertEqual(ext["complainants"][0]["phone"], "0795412890")
+
+        # Two-stage OCR mixed-script repair cleans foreign noise while locking extracted digits
+        dirty_stage1 = {
+            "raw_transcription": "سالم 9851042817",
+            "paper_date": "2026/11/10",
+            "complainants": [{"party_category": "مواطن", "name": "سالم", "national_id": "9851042817", "phone": "0795412890", "address": "ضاحية الياسمين"}],
+            "respondents": [{"party_category": "مواطن", "name": "إبراهيم", "national_id": "9901037419", "phone": "0788123456", "address": "ضاحية الياسمين"}],
+            "subject": "إغلاق كراج Buildings",
+            "summary": "يقوم بإغلاق مدخل البناء والREFUSE المكرر",
+            "has_signature": True,
+            "no_pending_lawsuit_declared": False,
+        }
+        repaired_stage2_corrupted_digits = {
+            **dirty_stage1,
+            "subject": "إغلاق مدخل الكراج",
+            "summary": "يقوم بإغلاق مدخل البناء والرفض المكرر",
+            "no_pending_lawsuit_declared": True,
+            "respondents": [{"party_category": "مواطن", "name": "إبراهيم خليل", "national_id": "1111111111", "phone": "0700000000", "address": "ضاحية الياسمين"}],
+            "ai_recommended_action": "توديع عن طريق مركز أمني",
+        }
+        calls = []
+
+        def fake_post(req, timeout=60):
+            calls.append(json.loads(req.data.decode("utf-8")))
+            resp = mock.MagicMock()
+            body = dirty_stage1 if len(calls) == 1 else repaired_stage2_corrupted_digits
+            routed = "dots-studio/dots-3-note-preview:free" if len(calls) == 1 else "nvidia/nemotron-3-ultra-550b-a55b:free"
+            resp.read.return_value = json.dumps(
+                {"model": routed, "choices": [{"message": {"content": json.dumps(body, ensure_ascii=False)}}]}
+            ).encode("utf-8")
+            resp.__enter__.return_value = resp
+            return resp
+
+        or_settings = {
+            "provider": "openai",
+            "model_name": "dots-studio/dots-3-note-preview:free",
+            "api_base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or-test-key",
+            "is_enabled": 1,
+        }
+        with mock.patch("urllib.request.urlopen", side_effect=fake_post):
+            res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", or_settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(res["extracted"]["subject"], "إغلاق مدخل الكراج")
+        self.assertEqual(res["extracted"]["summary"], "يقوم بإغلاق مدخل البناء والرفض المكرر")
+        self.assertTrue(res["extracted"]["no_pending_lawsuit_declared"])
+        # Digit lock must keep Stage 1 IDs/phones even if Stage 2 altered them
+        self.assertEqual(res["extracted"]["respondents"][0]["national_id"], "9901037419")
+        self.assertEqual(res["extracted"]["respondents"][0]["phone"], "0788123456")
+        self.assertEqual(res["extracted"]["respondents"][0]["name"], "إبراهيم خليل")
 
 
 class TestComplaintsUtilities(unittest.TestCase):

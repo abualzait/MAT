@@ -11,7 +11,7 @@ import re
 import ssl
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 ALLOWED_RECOMMENDED_ACTIONS = [
     "توديع عن طريق مركز أمني",
@@ -20,45 +20,66 @@ ALLOWED_RECOMMENDED_ACTIONS = [
     "حفظ / توجيه للقضاء المختص",
 ]
 
+OPENROUTER_FREE_VISION_FALLBACKS = [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "dots-studio/dots-3-note-preview:free",
+]
+
+OPENROUTER_FREE_TEXT_CLEANUP_MODELS = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "xingchen-agi/xing4.0-29b-a4b:free",
+]
+
 DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
     "openai": "gpt-4o",
     "ollama": "llama3.2-vision",
 }
 
-COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني وإداري ومحلل وثائق رسمي تابع لوزارة الداخلية الأردنية - محافظة العاصمة (متصرفية لواء قصبة عمان).
-أمامك صورة أو مستند لاستدعاء / نموذج شكوى خطي رسمي (استمارة الشكوى والمراكز الأمنية).
-المطلوب منك تفريغ محتويات الشكوى بدقة متناهية وإجراء تحليل إداري وقانوني للشكوى وتحديد مدى الحاجة لمتابعة المراكز الأمنية.
+COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني ومحرر وثائق رسمي في وزارة الداخلية الأردنية - محافظة العاصمة (متصرفية لواء قصبة عمان).
+أمامك صورة أو مستند لاستدعاء / نموذج شكوى رسمي (عنوانه غالباً: عطوفة متصرف لواء قصبة عمان المحترم - نموذج شكوى).
+المطلوب منك تفريغ محتويات الشكوى من الصورة بدقة حرفية متناهية وإجراء التحليل الإداري والقانوني للشكوى وتحديد مدى الحاجة لمتابعة المراكز الأمنية.
 
-قم بإرجاع النتيجة حصراً بصيغة JSON نظيفة وصحيحة وبدون أي مقدمات أو شروحات خارج كائن الـ JSON بالهيكل التالي:
+تعليمات الدقة الصارمة (إلزامية):
+- ابدأ بتعبئة حقل `raw_transcription` بنسخ كل سطر مقروء في الورقة من الأعلى إلى الأسفل باللغة العربية السليمة حرفياً قبل تعبئة باقي الحقول.
+- اقرأ الجداول بعناية من اليمين إلى اليسار: جدول (بيانات المشتكين / المدعين) يذهب إلى `complainants`، وجدول (بيانات المشتكى عليهم) يذهب إلى `respondents`.
+- انقل الأسماء والرقم الوطني (غالباً 10 أرقام) ورقم الهاتف (يبدأ غالباً بـ 07) والعناوين والتاريخ (`paper_date` أعلى الورقة) ونص الشكوى (`summary`) حرفاً بحرف ورقماً برقم كما هي في الصورة تماماً.
+- لا تخمّن أو تؤلف أي اسم أو رقم غير مقروء؛ إذا كانت خانة فارغة أو غير مقروءة تماماً اتركها نصاً فارغاً "" (أو اكتب [غير واضح] فقط داخل `raw_transcription`).
+- إذا ورد إقرار مثل "أقر بعدم وجود قضية منظورة أمام المحاكم بخصوص هذه الشكوى" مع إشارة (✓ / نعم) فإن `no_pending_lawsuit_declared` تكون `true`، وإذا ذُكر وجود قضية قائمة أو وضع علامة لا تكون `false`.
+- إذا ظهر توقيع خطي أو اسم في خانة توقيع المشتكي أسفل الورقة فإن `has_signature` تكون `true`.
+- اكتب جميع النصوص المستخرجة والتحليل والتوصية باللغة العربية السليمة فقط دون إدخال كلمات إنجليزية أو أجنبية.
+
+قم بإرجاع النتيجة حصراً بصيغة JSON صالحة ونظيفة وبدون أي مقدمات أو شروحات خارج كائن الـ JSON بالهيكل التالي:
 {
-  "paper_date": "تاريخ تقديم الشكوى المكتوب في الورقة إن وجد",
+  "raw_transcription": "التفريغ الحرفي الكامل لجميع أسطر الورقة من الأعلى للأسفل باللغة العربية",
+  "paper_date": "تاريخ تقديم الشكوى المكتوب في الورقة إن وجد أو فارغ",
   "complainants": [
     {
       "party_category": "أحد الخيارات: مواطن أو مؤسسة تجارية أو مؤسسة حكومية",
-      "name": "الاسم الكامل للمشتكي",
-      "national_id": "الرقم الوطني أو الرقم التجاري",
-      "phone": "رقم الهاتف",
-      "address": "العنوان بالتفصيل"
+      "name": "الاسم الكامل للمشتكي كما هو مكتوب",
+      "national_id": "الرقم الوطني أو الرقم التجاري بالأرقام فقط",
+      "phone": "رقم الهاتف بالأرقام فقط",
+      "address": "العنوان بالتفصيل كما هو مكتوب"
     }
   ],
   "respondents": [
     {
       "party_category": "أحد الخيارات: مواطن أو منشأة",
-      "name": "اسم المشتكى عليه أو اسم المحل/المنشأة",
+      "name": "اسم المشتكى عليه أو اسم المحل/المنشأة كما هو مكتوب",
       "national_id": "الرقم الوطني إن وجد أو فارغ",
-      "phone": "رقم الهاتف",
-      "address": "العنوان بالتفصيل"
+      "phone": "رقم الهاتف إن وجد أو فارغ",
+      "address": "العنوان بالتفصيل كما هو مكتوب"
     }
   ],
-  "subject": "موضوع الشكوى بدقة واختصار",
-  "summary": "موجز وتفاصيل وقائع الشكوى كما سردها المشتكي",
+  "subject": "موضوع الشكوى بدقة واختصار بالعربية",
+  "summary": "موجز وتفاصيل وقائع الشكوى كما سردها المشتكي حرفياً بالعربية",
   "has_signature": true,
   "no_pending_lawsuit_declared": true,
   "is_minor_police_complaint": true,
-  "police_necessity_reason": "سبب توجيه الشكوى للمركز الأمني أو سبب حفظها",
-  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني لها",
-  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح لإنهاء النزاع وإصلاح ذات البين",
+  "police_necessity_reason": "سبب توجيه الشكوى للمركز الأمني أو سبب حفظها بالعربية",
+  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني لها بالعربية",
+  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح لإنهاء النزاع وإصلاح ذات البين بالعربية",
   "ai_recommended_action": "توديع عن طريق مركز أمني",
   "ai_confidence": 0.92
 }
@@ -66,8 +87,7 @@ COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني وإداري وم�
 1) 'توديع عن طريق مركز أمني'
 2) 'اتصال هاتفي'
 3) 'توديع مغفور'
-4) 'حفظ / توجيه للقضاء المختص'
-تأكد من كتابة نصوص عربية سليمة وواضحة والالتزام التام بالخيارات المحددة."""
+4) 'حفظ / توجيه للقضاء المختص'"""
 
 
 def _default_model_for_provider(provider: str) -> str:
@@ -286,6 +306,37 @@ def _parse_llm_json(raw_text: str) -> Dict[str, Any]:
     return {}
 
 
+_UNREADABLE_PLACEHOLDERS = {
+    "[غير واضح]",
+    "غير واضح",
+    "[غير مقروء]",
+    "غير مقروء",
+    "غير متوفر",
+    "لا يوجد",
+    "فارغ",
+    "n/a",
+    "unknown",
+    "unclear",
+}
+
+
+def _clean_extracted_text(val: Any, clear_placeholder: bool = False) -> str:
+    """Trim whitespace and optionally clear placeholder tokens from OCR fields."""
+    text = str(val or "").strip()
+    if clear_placeholder and text.lower() in _UNREADABLE_PLACEHOLDERS:
+        return ""
+    return text
+
+
+def _normalize_arabic_digits(val: Any) -> str:
+    """Convert Eastern Arabic numerals to Western digits inside IDs and phone numbers."""
+    text = _clean_extracted_text(val, clear_placeholder=True)
+    if not text:
+        return ""
+    trans = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+    return text.translate(trans)
+
+
 def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Partition extracted form data and AI analysis fields with verified defaults."""
     ext_src = data.get("extracted") if isinstance(data.get("extracted"), dict) else data
@@ -298,15 +349,15 @@ def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], D
                 cat = str(c.get("party_category") or "مواطن").strip()
                 if cat not in ("مواطن", "مؤسسة تجارية", "مؤسسة حكومية"):
                     cat = "مواطن"
-                complainants.append(
-                    {
-                        "party_category": cat,
-                        "name": str(c.get("name") or "").strip(),
-                        "national_id": str(c.get("national_id") or "").strip(),
-                        "phone": str(c.get("phone") or "").strip(),
-                        "address": str(c.get("address") or "").strip(),
-                    }
-                )
+                row = {
+                    "party_category": cat,
+                    "name": _clean_extracted_text(c.get("name"), clear_placeholder=True),
+                    "national_id": _normalize_arabic_digits(c.get("national_id")),
+                    "phone": _normalize_arabic_digits(c.get("phone")),
+                    "address": _clean_extracted_text(c.get("address"), clear_placeholder=True),
+                }
+                if any(row[k] for k in ("name", "national_id", "phone", "address")):
+                    complainants.append(row)
 
     respondents_raw = ext_src.get("respondents")
     respondents = []
@@ -316,22 +367,23 @@ def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], D
                 cat = str(r.get("party_category") or "مواطن").strip()
                 if cat not in ("مواطن", "منشأة"):
                     cat = "مواطن"
-                respondents.append(
-                    {
-                        "party_category": cat,
-                        "name": str(r.get("name") or "").strip(),
-                        "national_id": str(r.get("national_id") or "").strip(),
-                        "phone": str(r.get("phone") or "").strip(),
-                        "address": str(r.get("address") or "").strip(),
-                    }
-                )
+                row = {
+                    "party_category": cat,
+                    "name": _clean_extracted_text(r.get("name"), clear_placeholder=True),
+                    "national_id": _normalize_arabic_digits(r.get("national_id")),
+                    "phone": _normalize_arabic_digits(r.get("phone")),
+                    "address": _clean_extracted_text(r.get("address"), clear_placeholder=True),
+                }
+                if any(row[k] for k in ("name", "national_id", "phone", "address")):
+                    respondents.append(row)
 
     extracted = {
-        "paper_date": str(ext_src.get("paper_date") or "").strip(),
+        "raw_transcription": _clean_extracted_text(ext_src.get("raw_transcription")),
+        "paper_date": _normalize_arabic_digits(ext_src.get("paper_date")),
         "complainants": complainants,
         "respondents": respondents,
-        "subject": str(ext_src.get("subject") or "").strip(),
-        "summary": str(ext_src.get("summary") or "").strip(),
+        "subject": _clean_extracted_text(ext_src.get("subject"), clear_placeholder=True),
+        "summary": _clean_extracted_text(ext_src.get("summary"), clear_placeholder=True),
         "has_signature": bool(ext_src.get("has_signature")),
         "no_pending_lawsuit_declared": bool(ext_src.get("no_pending_lawsuit_declared")),
     }
@@ -395,7 +447,7 @@ def _call_gemini(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], pr
             }
         ],
         "generationConfig": {
-            "temperature": 0.2,
+            "temperature": 0.0,
             "response_mime_type": "application/json",
         },
     }
@@ -426,8 +478,58 @@ def _call_gemini(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], pr
     return parts[0].get("text", "")
 
 
-def _call_openai(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], prompt: str) -> str:
-    """Invoke OpenAI Vision endpoint with Bearer auth and base64 image data URI."""
+def _is_openrouter_endpoint(base_url: str) -> bool:
+    """Return True when targeting OpenRouter's unified API gateway."""
+    return "openrouter.ai" in (base_url or "").lower()
+
+
+def _resolve_openrouter_vision_models(configured_model: str) -> List[str]:
+    """Order reliable OpenRouter free vision candidates without keeping known-weak Arabic models first."""
+    model = (configured_model or "").strip()
+    if not model or model == "nvidia/nemotron-3.5-super-vl:free":
+        return list(OPENROUTER_FREE_VISION_FALLBACKS)
+    return [model] + [m for m in OPENROUTER_FREE_VISION_FALLBACKS if m != model]
+
+
+def _extract_openai_message_text(choice: Dict[str, Any]) -> str:
+    """Extract text content cleanly, falling back to reasoning JSON if content is empty."""
+    msg = choice.get("message") or {}
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        content = "\n".join(
+            str(part.get("text", "")) for part in content if isinstance(part, dict)
+        )
+    text = str(content or "").strip()
+    if text:
+        return text
+    reasoning = str(msg.get("reasoning") or "").strip()
+    if "{" in reasoning and "}" in reasoning:
+        return reasoning
+    return ""
+
+
+def _post_openai_chat(url: str, api_key: str, payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
+    """POST to OpenAI-compatible /chat/completions endpoint and parse JSON envelope."""
+    req_data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=req_data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "MAT-Toolkit/1.46",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8")
+    return json.loads(body)
+
+
+def _call_openai_with_meta(
+    file_bytes: bytes, mime_type: str, settings: Dict[str, Any], prompt: str
+) -> Tuple[str, str]:
+    """Invoke OpenAI/OpenRouter Vision endpoint with high detail, temperature 0.0, and fallback retries."""
     if mime_type.lower() == "application/pdf":
         raise ValueError(
             "OpenAI vision does not support direct PDF files. Please upload PNG/JPG images or switch to Gemini."
@@ -440,67 +542,97 @@ def _call_openai(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], pr
 
     base_url = (settings.get("api_base_url") or "https://api.openai.com/v1").rstrip("/")
     url = f"{base_url}/chat/completions"
+    is_openrouter = _is_openrouter_endpoint(base_url)
+    is_free_openrouter = is_openrouter and (
+        model.endswith(":free") or model == "openrouter/free"
+    )
 
     b64_data = base64.b64encode(file_bytes).decode("ascii")
-    def _send_openai_req(use_response_format: bool) -> str:
-        payload = {
+
+    def _build_payload(
+        use_response_format: bool,
+        use_high_detail: bool,
+        use_openrouter_routing: bool,
+        use_reasoning_disable: bool,
+    ) -> Dict[str, Any]:
+        image_obj: Dict[str, Any] = {"url": f"data:{mime_type};base64,{b64_data}"}
+        if use_high_detail:
+            image_obj["detail"] = "high"
+
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": [
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{b64_data}"
-                            },
-                        },
+                        {"type": "image_url", "image_url": image_obj},
                     ],
                 }
             ],
-            "temperature": 0.2,
+            "temperature": 0.0,
+            "max_tokens": 4096,
         }
+        if use_openrouter_routing:
+            candidates = _resolve_openrouter_vision_models(model)
+            payload["model"] = candidates[0]
+            payload["models"] = candidates
+        if use_reasoning_disable:
+            payload["reasoning"] = {"enabled": False}
         if use_response_format:
             payload["response_format"] = {"type": "json_object"}
+        return payload
 
-        req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=req_data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "MAT-Toolkit/1.46",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read().decode("utf-8")
+    use_rf = True
+    use_detail = True
+    use_or_models = is_free_openrouter
+    use_no_reason = is_free_openrouter
 
-    try:
-        body = _send_openai_req(True)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 400:
-            err_detail = _format_http_error(exc, api_key).lower()
-            if "response_format" in err_detail or "json_object" in err_detail or "structured" in err_detail:
-                body = _send_openai_req(False)
-            else:
+    resp_json: Dict[str, Any] = {}
+    for _attempt in range(5):
+        try:
+            payload = _build_payload(use_rf, use_detail, use_or_models, use_no_reason)
+            resp_json = _post_openai_chat(url, api_key, payload, timeout=75)
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code in (400, 404):
+                err_detail = _format_http_error(exc, api_key)
+                low = err_detail.lower()
+                changed = False
+                if use_rf and (
+                    exc.code == 404
+                    or "response_format" in low
+                    or "json_object" in low
+                    or "structured" in low
+                ):
+                    use_rf = False
+                    changed = True
+                if use_detail and "detail" in low:
+                    use_detail = False
+                    changed = True
+                if use_no_reason and "reasoning" in low:
+                    use_no_reason = False
+                    changed = True
+                if use_or_models and "models" in low:
+                    use_or_models = False
+                    changed = True
+                if changed:
+                    continue
                 raise urllib.error.HTTPError(exc.url, exc.code, err_detail, exc.headers, None) from None
-        else:
             raise
 
-    resp_json = json.loads(body)
     choices = resp_json.get("choices") or []
     if not choices:
         raise RuntimeError("OpenAI API returned no choices")
 
-    content = choices[0].get("message", {}).get("content", "")
-    if isinstance(content, list):
-        content = "\n".join(
-            str(part.get("text", "")) for part in content if isinstance(part, dict)
-        )
-    return str(content or "")
+    routed_model = str(resp_json.get("model") or model).strip() or model
+    return _extract_openai_message_text(choices[0]), routed_model
+
+
+def _call_openai(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], prompt: str) -> str:
+    """Invoke OpenAI Vision endpoint with Bearer auth and base64 image data URI."""
+    content, _routed = _call_openai_with_meta(file_bytes, mime_type, settings, prompt)
+    return content
 
 
 def _call_ollama(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], prompt: str) -> str:
@@ -539,6 +671,117 @@ def _call_ollama(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], pr
     return message.get("content", "")
 
 
+_FOREIGN_SCRIPT_RE = re.compile(
+    r"[\u4e00-\u9fff\u3040-\u30ff\u0400-\u04ff\uac00-\ud7af]|[A-Za-z]{2,}"
+)
+
+
+def _has_foreign_script_noise(parsed: Dict[str, Any]) -> bool:
+    """Detect leaked English, CJK, Kana, or Cyrillic tokens inside Arabic extracted fields."""
+    if not isinstance(parsed, dict):
+        return False
+    texts: List[str] = []
+    for key in (
+        "raw_transcription",
+        "subject",
+        "summary",
+        "police_necessity_reason",
+        "ai_analysis",
+        "ai_solution_recommendation",
+    ):
+        val = parsed.get(key)
+        if isinstance(val, str) and val.strip():
+            texts.append(val)
+    for list_key in ("complainants", "respondents"):
+        rows = parsed.get(list_key)
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    for fkey in ("name", "address"):
+                        v = row.get(fkey)
+                        if isinstance(v, str) and v.strip():
+                            texts.append(v)
+    combined = "\n".join(texts)
+    return bool(_FOREIGN_SCRIPT_RE.search(combined))
+
+
+def _lock_verified_digits(orig_parsed: Dict[str, Any], repaired_parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure Stage 2 text repair never mutates extracted numeric IDs, phones, or dates."""
+    if not isinstance(orig_parsed, dict) or not isinstance(repaired_parsed, dict):
+        return repaired_parsed
+
+    merged = dict(repaired_parsed)
+    orig_ext, _ = _normalize_complaint_result(orig_parsed)
+
+    orig_date = orig_ext.get("paper_date") or ""
+    if len(re.sub(r"\D", "", orig_date)) >= 4:
+        merged["paper_date"] = orig_date
+
+    for list_key in ("complainants", "respondents"):
+        orig_rows = orig_ext.get(list_key) or []
+        rep_rows = merged.get(list_key)
+        if not isinstance(rep_rows, list) or not orig_rows:
+            merged[list_key] = orig_rows
+            continue
+        locked_rows = []
+        for idx, rep_row in enumerate(rep_rows):
+            row_copy = dict(rep_row) if isinstance(rep_row, dict) else {}
+            if idx < len(orig_rows):
+                o_row = orig_rows[idx]
+                for num_key in ("national_id", "phone"):
+                    o_val = _normalize_arabic_digits(o_row.get(num_key))
+                    if len(re.sub(r"\D", "", o_val)) >= 6:
+                        row_copy[num_key] = o_val
+            locked_rows.append(row_copy)
+        merged[list_key] = locked_rows
+    return merged
+
+
+def _repair_mixed_script_ocr_json(
+    parsed: Dict[str, Any], settings: Dict[str, Any]
+) -> Tuple[Dict[str, Any], str]:
+    """Clean leaked non-Arabic OCR tokens via a pure-Arabic text LLM while locking numeric IDs."""
+    base_url = (settings.get("api_base_url") or "").rstrip("/")
+    api_key = str(settings.get("api_key") or "").strip()
+    if not base_url or not api_key or not _is_openrouter_endpoint(base_url):
+        return parsed, ""
+
+    cleanup_prompt = (
+        "أنت مدقق لغوي وقانوني أردني في متصرفية لواء قصبة عمان.\n"
+        "البيانات التالية مُفرّغة آلياً (OCR) من نموذج شكوى وقد تحتوي على كلمات أجنبية أو رموز دخيلة تسللت مكان كلمات عربية قريبة من السياق:\n"
+        f"{json.dumps(parsed, ensure_ascii=False)}\n\n"
+        "التعليمات الإلزامية:\n"
+        "1) صحّح فقط الكلمات الأجنبية أو المشوشة في الحقول النصية لتصبح عربية سليمة ومطابقة لسياق الشكوى تماماً دون اختراع وقائع غير موجودة.\n"
+        "2) حافظ على جميع الأسماء والأرقام الوطنية وأرقام الهواتف والتواريخ كما هي حرفياً دون تغيير أي رقم.\n"
+        "3) إذا ورد في النص إقرار مثل (أقر بعدم وجود قضية منظورة أمام المحاكم... نعم / ✓) اجعل `no_pending_lawsuit_declared` قيمتها `true`.\n"
+        "4) اكتب `police_necessity_reason` و`ai_analysis` و`ai_solution_recommendation` باللغة العربية الفصحى الرسمية فقط.\n"
+        "5) التزم في `ai_recommended_action` بأحد الخيارات الأربعة فقط: "
+        "'توديع عن طريق مركز أمني' أو 'اتصال هاتفي' أو 'توديع مغفور' أو 'حفظ / توجيه للقضاء المختص'.\n"
+        "6) أعد كائن JSON صالحاً فقط بنفس المفاتيح بدون أي نص خارجه."
+    )
+
+    payload = {
+        "model": OPENROUTER_FREE_TEXT_CLEANUP_MODELS[0],
+        "models": list(OPENROUTER_FREE_TEXT_CLEANUP_MODELS),
+        "reasoning": {"enabled": False},
+        "messages": [{"role": "user", "content": cleanup_prompt}],
+        "temperature": 0.0,
+        "max_tokens": 3072,
+    }
+    try:
+        resp_json = _post_openai_chat(f"{base_url}/chat/completions", api_key, payload, timeout=45)
+        choices = resp_json.get("choices") or []
+        if not choices:
+            return parsed, ""
+        text = _extract_openai_message_text(choices[0])
+        repaired = _parse_llm_json(text)
+        if not repaired or not isinstance(repaired, dict):
+            return parsed, ""
+        return _lock_verified_digits(parsed, repaired), text
+    except Exception:
+        return parsed, ""
+
+
 def extract_and_analyze_complaint(
     file_bytes: bytes, mime_type: str, settings: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -571,11 +814,14 @@ def extract_and_analyze_complaint(
         }
 
     raw_text = ""
+    effective_model = model
     try:
         if provider == "gemini":
             raw_text = _call_gemini(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
         elif provider == "openai":
-            raw_text = _call_openai(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
+            raw_text, effective_model = _call_openai_with_meta(
+                file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT
+            )
         elif provider == "ollama":
             raw_text = _call_ollama(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
         else:
@@ -594,19 +840,25 @@ def extract_and_analyze_complaint(
             return {
                 "status": "manual_fallback",
                 "provider": provider,
-                "model": model,
+                "model": effective_model,
                 "extracted": {},
                 "analysis": {},
                 "raw_text": raw_text,
                 "message": "LLM output could not be parsed as structured JSON",
             }
 
+        if provider == "openai" and _has_foreign_script_noise(parsed):
+            repaired_parsed, repaired_raw = _repair_mixed_script_ocr_json(parsed, settings)
+            if repaired_raw:
+                parsed = repaired_parsed
+                raw_text = repaired_raw
+
         extracted, analysis = _normalize_complaint_result(parsed)
 
         return {
             "status": "ok",
             "provider": provider,
-            "model": model,
+            "model": effective_model,
             "extracted": extracted,
             "analysis": analysis,
             "raw_text": raw_text,
@@ -617,7 +869,7 @@ def extract_and_analyze_complaint(
         return {
             "status": "manual_fallback",
             "provider": provider,
-            "model": model,
+            "model": effective_model,
             "extracted": {},
             "analysis": {},
             "raw_text": raw_text,
@@ -628,7 +880,7 @@ def extract_and_analyze_complaint(
         return {
             "status": "manual_fallback",
             "provider": provider,
-            "model": model,
+            "model": effective_model,
             "extracted": {},
             "analysis": {},
             "raw_text": raw_text,
@@ -689,11 +941,18 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
         elif provider == "openai":
             base_url = (settings.get("api_base_url") or "https://api.openai.com/v1").rstrip("/")
             url = f"{base_url}/chat/completions"
-            payload = {
+            is_openrouter = _is_openrouter_endpoint(base_url)
+            is_free_or = is_openrouter and (model.endswith(":free") or model == "openrouter/free")
+            payload: Dict[str, Any] = {
                 "model": model,
                 "messages": [{"role": "user", "content": "ping"}],
-                "max_tokens": 5,
+                "max_tokens": 16 if is_free_or else 5,
             }
+            if is_free_or:
+                candidates = _resolve_openrouter_vision_models(model)
+                payload["model"] = candidates[0]
+                payload["models"] = candidates
+                payload["reasoning"] = {"enabled": False}
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
@@ -704,7 +963,7 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=15 if is_free_or else 10) as resp:
                 status = getattr(resp, "status", 200)
                 if isinstance(status, int) and not (200 <= status < 300):
                     return {"ok": False, "message": f"Unexpected status {status}", "provider": provider}
@@ -719,11 +978,12 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                         "message": "Endpoint did not return valid AI completion JSON (check Base URL / model / retired endpoint)",
                         "provider": provider,
                     }
+                resolved_model = str(parsed_body.get("model") or model).strip() or model
                 return {
                     "ok": True,
                     "message": "اتصال مزود OpenAI ناجح",
                     "provider": provider,
-                    "model": model,
+                    "model": resolved_model,
                 }
         elif provider == "ollama":
             base_url = (settings.get("api_base_url") or "http://localhost:11434").rstrip("/")

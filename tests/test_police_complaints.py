@@ -1,0 +1,409 @@
+import hashlib
+import json
+import os
+import sqlite3
+import tempfile
+import threading
+import unittest
+import urllib.request
+
+import server
+
+
+class TestDatabaseMigrations(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "test_mat.db")
+        self.backup_path = os.path.join(self.tmpdir.name, "backup.json")
+        self.orig_db = server.DB_PATH
+        self.orig_backup = server.BACKUP_JSON_PATH
+        server.DB_PATH = self.db_path
+        server.BACKUP_JSON_PATH = self.backup_path
+
+    def tearDown(self):
+        server.DB_PATH = self.orig_db
+        server.BACKUP_JSON_PATH = self.orig_backup
+        self.tmpdir.cleanup()
+
+    def test_init_db_migrates_legacy_officers_constraint_and_creates_complaint_tables(self):
+        # Create pre-existing legacy mat_officers table WITHOUT 'governor' role
+        conn = sqlite3.connect(self.db_path)
+        conn.executescript("""
+            CREATE TABLE mat_officers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('admin', 'officer', 'caller')),
+                accessible_tools TEXT DEFAULT 'mat_complaints,finder',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                fcm_token TEXT
+            );
+            INSERT INTO mat_officers (name, username, password_hash, salt, role)
+            VALUES ('عروة', 'orwa', 'pbkdf2:abc', 'salt1', 'admin');
+        """)
+        conn.commit()
+        conn.close()
+
+        server.init_db()
+
+        conn = server.get_db()
+        try:
+            # Governor account must exist and role check must allow 'governor'
+            gov = conn.execute(
+                "SELECT username, role, accessible_tools FROM mat_officers WHERE username = 'governor'"
+            ).fetchone()
+            self.assertIsNotNone(gov)
+            self.assertEqual(gov["role"], "governor")
+            self.assertIn("police_complaints", gov["accessible_tools"])
+
+            # Orwa must retain data and receive police_complaints access
+            orwa = conn.execute(
+                "SELECT accessible_tools FROM mat_officers WHERE username = 'orwa'"
+            ).fetchone()
+            self.assertIn("police_complaints", orwa["accessible_tools"])
+
+            # Extended columns on mat_complaints
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(mat_complaints)").fetchall()}
+            for required_col in (
+                "workflow_stage",
+                "officer_action",
+                "officer_notes",
+                "section_head_notes",
+                "governor_decision",
+                "nearest_station",
+                "last_followup_at",
+            ):
+                self.assertIn(required_col, cols)
+
+            # New tables exist
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            self.assertTrue(
+                {
+                    "mat_complaint_scans",
+                    "mat_complaint_workflow_log",
+                    "mat_llm_settings",
+                }.issubset(tables)
+            )
+        finally:
+            conn.close()
+
+    def test_init_db_preserves_existing_officers_foreign_keys_and_indexes(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.executescript("""
+            PRAGMA foreign_keys=ON;
+            CREATE TABLE mat_officers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('admin', 'officer', 'caller')),
+                accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,chat',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                fcm_token TEXT
+            );
+            CREATE TABLE mat_complaints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                complaint_number TEXT,
+                subject TEXT NOT NULL,
+                complaint_type TEXT DEFAULT 'عام',
+                status TEXT DEFAULT 'جديد',
+                priority TEXT DEFAULT 'عادي',
+                notes TEXT,
+                assigned_officer_id INTEGER REFERENCES mat_officers(id),
+                created_by_id INTEGER REFERENCES mat_officers(id),
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE mat_parties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                complaint_id INTEGER NOT NULL REFERENCES mat_complaints(id) ON DELETE CASCADE,
+                party_type TEXT NOT NULL CHECK(party_type IN ('شاكي', 'مشتكى_عليه')),
+                name TEXT NOT NULL,
+                phone TEXT,
+                national_id TEXT,
+                address TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE mat_sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES mat_officers(id),
+                username TEXT NOT NULL,
+                role TEXT NOT NULL,
+                name TEXT NOT NULL,
+                accessible_tools TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                last_seen TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE mat_chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER REFERENCES mat_officers(id),
+                message TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            INSERT INTO mat_officers (id, name, username, password_hash, salt, role, fcm_token)
+            VALUES
+                (1, 'عروة', 'orwa', 'pbkdf2:hash1', 'salt1', 'admin', 'fcm-orwa'),
+                (2, 'ايهاب', 'ehab', 'pbkdf2:hash2', 'salt2', 'officer', NULL),
+                (3, 'سلطان', 'sultan', 'pbkdf2:hash3', 'salt3', 'officer', NULL),
+                (4, 'ابوالزيت', 'abualzait', 'pbkdf2:hash4', 'salt4', 'officer', NULL),
+                (5, 'رعد', 'raad', 'pbkdf2:hash5', 'salt5', 'caller', NULL);
+            INSERT INTO mat_complaints (id, complaint_number, subject, assigned_officer_id, created_by_id)
+            VALUES (10, 'C-10', 'شكوى قديمة', 2, 1);
+            INSERT INTO mat_sessions (token, user_id, username, role, name, accessible_tools)
+            VALUES ('tok-1', 1, 'orwa', 'admin', 'عروة', 'dashboard,mat_complaints');
+            INSERT INTO mat_chat_messages (user_id, message) VALUES (1, 'مرحبا');
+        """)
+        conn.commit()
+        conn.close()
+
+        server.init_db()
+
+        conn = server.get_db()
+        try:
+            # Verify all 5 original officers retain exact credentials & fcm_token
+            officers = {
+                r["username"]: dict(r)
+                for r in conn.execute("SELECT * FROM mat_officers").fetchall()
+            }
+            self.assertEqual(officers["orwa"]["password_hash"], "pbkdf2:hash1")
+            self.assertEqual(officers["orwa"]["salt"], "salt1")
+            self.assertEqual(officers["orwa"]["fcm_token"], "fcm-orwa")
+            self.assertEqual(officers["ehab"]["password_hash"], "pbkdf2:hash2")
+            self.assertEqual(officers["sultan"]["role"], "officer")
+            self.assertEqual(officers["abualzait"]["role"], "officer")
+            self.assertEqual(officers["raad"]["role"], "caller")
+            self.assertIn("police_complaints", officers["ehab"]["accessible_tools"])
+            self.assertNotIn("police_complaints", officers["raad"]["accessible_tools"])
+
+            # Verify FK-linked rows remain intact and FK check passes
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM mat_sessions").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM mat_chat_messages").fetchone()[0], 1)
+            legacy_c = conn.execute("SELECT subject, last_followup_at FROM mat_complaints WHERE id = 10").fetchone()
+            self.assertEqual(legacy_c["subject"], "شكوى قديمة")
+            self.assertIsNotNone(legacy_c["last_followup_at"])
+            fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+            self.assertEqual(fk_errors, [])
+
+            # Verify mat_parties extended column and all new indexes
+            party_cols = {r[1] for r in conn.execute("PRAGMA table_info(mat_parties)").fetchall()}
+            self.assertIn("party_category", party_cols)
+
+            indexes = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index'"
+                ).fetchall()
+            }
+            self.assertTrue(
+                {
+                    "idx_mat_complaints_stage",
+                    "idx_mat_complaints_followup",
+                    "idx_mat_complaint_scans_cid",
+                    "idx_mat_complaint_log_cid",
+                }.issubset(indexes)
+            )
+        finally:
+            conn.close()
+
+    def test_init_db_fresh_database_seeds_governor_and_all_defaults(self):
+        server.init_db()
+        conn = server.get_db()
+        try:
+            officers = {
+                r["username"]: dict(r)
+                for r in conn.execute("SELECT * FROM mat_officers").fetchall()
+            }
+            for uname in ("orwa", "ehab", "sultan", "abualzait", "raad", "governor"):
+                self.assertIn(uname, officers)
+            gov = officers["governor"]
+            self.assertEqual(gov["name"], "عطوفة المتصرف")
+            self.assertEqual(gov["role"], "governor")
+            self.assertEqual(gov["accessible_tools"], "dashboard,police_complaints,finder,chat")
+
+            # Verify governor password '12345' hashes correctly
+            expected_hash = "pbkdf2:" + hashlib.pbkdf2_hmac(
+                "sha256", b"12345", gov["salt"].encode(), 100000
+            ).hex()
+            self.assertEqual(gov["password_hash"], expected_hash)
+            self.assertIn("police_complaints", officers["orwa"]["accessible_tools"])
+            self.assertIn("police_complaints", officers["ehab"]["accessible_tools"])
+        finally:
+            conn.close()
+
+    def test_backup_and_restore_excludes_api_key_and_preserves_extended_columns(self):
+        server.init_db()
+        conn = server.get_db()
+        try:
+            gov_id = conn.execute("SELECT id FROM mat_officers WHERE username='governor'").fetchone()["id"]
+            admin_id = conn.execute("SELECT id FROM mat_officers WHERE username='orwa'").fetchone()["id"]
+            officer_id = conn.execute("SELECT id FROM mat_officers WHERE username='ehab'").fetchone()["id"]
+
+            conn.execute(
+                """
+                INSERT INTO mat_complaints (
+                    id, complaint_number, subject, complaint_type, status, priority, notes,
+                    assigned_officer_id, created_by_id,
+                    paper_date, complainant_category, respondent_category, summary,
+                    has_signature, no_pending_lawsuit_declared, workflow_stage,
+                    is_minor_police_complaint, ai_provider, ai_model, ai_extracted_json,
+                    ai_analysis, ai_solution_recommendation, ai_recommended_action, ai_confidence,
+                    officer_action, officer_notes, officer_reviewed_by_id, officer_reviewed_at,
+                    section_head_notes, section_recommended_action, section_head_id, section_head_at,
+                    governor_decision, governor_final_action, governor_notes, governor_id, governor_decided_at,
+                    nearest_station, police_directorate, liwa_name, station_lat, station_lon,
+                    linked_appointment_id, linked_file_number, last_followup_at
+                ) VALUES (
+                    101, 'PC-20261110-0101', 'موضوع شكوى', 'عام', 'معتمدة', 'عاجل', 'ملاحظة عامة',
+                    ?, ?,
+                    '2026-11-10', 'مؤسسة تجارية', 'منشأة', 'موجز تفصيلي للشكوى',
+                    1, 1, 'governor_approved',
+                    1, 'gemini', 'gemini-2.5-flash', '{"raw":true}',
+                    'تحليل ذكي', 'توصية حل', 'توديع عن طريق مركز أمني', 0.91,
+                    'توديع عن طريق مركز أمني', 'ملاحظة الضابط', ?, '2026-11-10 09:00:00',
+                    'مشروحات القسم', 'توديع عن طريق مركز أمني', ?, '2026-11-10 09:30:00',
+                    'موافقة', 'توديع عن طريق مركز أمني', 'قرار المتصرف', ?, '2026-11-10 10:00:00',
+                    'مركز أمن تلاع العلي', 'مديرية شرطة شمال عمان', 'لواء الجامعة', 31.99, 35.87,
+                    77, 'PC-20261110-0101', '2026-11-10 10:00:00'
+                )
+                """,
+                (officer_id, officer_id, officer_id, admin_id, gov_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO mat_parties (id, complaint_id, party_type, party_category, name, phone, address)
+                VALUES (201, 101, 'شاكي', 'مؤسسة تجارية', 'شركة الأفق', '0791234567', 'الشميساني')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO mat_complaint_scans (
+                    id, complaint_id, stored_filename, original_filename, mime_type,
+                    file_size, page_order, ocr_raw_text, uploaded_by_id
+                ) VALUES (301, 101, 'abc123.png', 'scan1.png', 'image/png', 1024, 1, 'نص مستخرج', ?)
+                """,
+                (officer_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO mat_complaint_workflow_log (
+                    id, complaint_id, actor_id, actor_role, stage_from, stage_to, action_taken, notes
+                ) VALUES (401, 101, ?, 'governor', 'pending_governor', 'governor_approved', 'موافقة', 'تم الاعتماد')
+                """,
+                (gov_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO mat_llm_settings (id, provider, model_name, api_base_url, api_key, is_enabled, updated_by_id)
+                VALUES (1, 'gemini', 'gemini-2.5-pro', 'https://example.invalid', 'SUPER_SECRET_API_KEY_98765', 1, ?)
+                """,
+                (admin_id,),
+            )
+            conn.commit()
+
+            server.backup_db_to_json(conn)
+        finally:
+            conn.close()
+
+        # Verify backup JSON excludes api_key and contains new tables
+        with open(self.backup_path, "r", encoding="utf-8") as f:
+            backup_raw = f.read()
+        self.assertNotIn("SUPER_SECRET_API_KEY_98765", backup_raw)
+        backup_data = json.loads(backup_raw)
+        self.assertEqual(len(backup_data["complaint_scans"]), 1)
+        self.assertEqual(len(backup_data["complaint_workflow_log"]), 1)
+        self.assertEqual(len(backup_data["llm_settings"]), 1)
+        self.assertNotIn("api_key", backup_data["llm_settings"][0])
+        self.assertEqual(backup_data["complaints"][0]["governor_decision"], "موافقة")
+
+        # Restore into a brand new empty DB (without running backup_db_to_json overwrite first)
+        os.remove(self.db_path)
+        server.init_db()
+        conn = server.get_db()
+        try:
+            restored_c = dict(conn.execute("SELECT * FROM mat_complaints WHERE id = 101").fetchone())
+            self.assertEqual(restored_c["paper_date"], "2026-11-10")
+            self.assertEqual(restored_c["complainant_category"], "مؤسسة تجارية")
+            self.assertEqual(restored_c["respondent_category"], "منشأة")
+            self.assertEqual(restored_c["workflow_stage"], "governor_approved")
+            self.assertEqual(restored_c["officer_notes"], "ملاحظة الضابط")
+            self.assertEqual(restored_c["section_head_notes"], "مشروحات القسم")
+            self.assertEqual(restored_c["governor_decision"], "موافقة")
+            self.assertEqual(restored_c["nearest_station"], "مركز أمن تلاع العلي")
+            self.assertAlmostEqual(restored_c["station_lat"], 31.99)
+            self.assertEqual(restored_c["linked_appointment_id"], 77)
+            self.assertEqual(restored_c["linked_file_number"], "PC-20261110-0101")
+
+            restored_p = conn.execute("SELECT party_category FROM mat_parties WHERE id = 201").fetchone()
+            self.assertEqual(restored_p["party_category"], "مؤسسة تجارية")
+            restored_s = conn.execute("SELECT stored_filename FROM mat_complaint_scans WHERE id = 301").fetchone()
+            self.assertEqual(restored_s["stored_filename"], "abc123.png")
+            restored_l = conn.execute("SELECT action_taken FROM mat_complaint_workflow_log WHERE id = 401").fetchone()
+            self.assertEqual(restored_l["action_taken"], "موافقة")
+
+            # Now set an api_key in DB and restore again from backup (which lacks api_key):
+            # existing api_key MUST NOT be overwritten with empty string
+            conn.execute("UPDATE mat_llm_settings SET api_key = 'LIVE_SECRET_KEY_111' WHERE id = 1")
+            conn.commit()
+            server.restore_db_from_json(conn)
+            live_row = conn.execute("SELECT api_key, model_name FROM mat_llm_settings WHERE id = 1").fetchone()
+            self.assertEqual(live_row["api_key"], "LIVE_SECRET_KEY_111")
+            self.assertEqual(live_row["model_name"], "gemini-2.5-pro")
+        finally:
+            conn.close()
+
+    def test_api_login_httponly_cookie_and_governor_default_names_fallback(self):
+        server.init_db()
+        # Delete governor from DB so api_login exercises default_names fallback as well
+        conn = server.get_db()
+        conn.execute("DELETE FROM mat_officers WHERE username = 'governor'")
+        conn.commit()
+        conn.close()
+
+        httpd = server.ThreadedHTTPServer(("127.0.0.1", 0), server.MatServerHandler)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v1/mat/login",
+                data=json.dumps({"username": "governor"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+                cookies = resp.headers.get_all("Set-Cookie") or []
+                body = json.loads(resp.read().decode("utf-8"))
+
+            session_cookies = [c for c in cookies if c.startswith("session=")]
+            csrf_cookies = [c for c in cookies if c.startswith("csrf_token=")]
+            self.assertEqual(len(session_cookies), 1)
+            self.assertEqual(len(csrf_cookies), 1)
+            self.assertIn("HttpOnly", session_cookies[0])
+            self.assertIn("SameSite=Lax", session_cookies[0])
+            self.assertNotIn("HttpOnly", csrf_cookies[0])
+            self.assertIn("SameSite=Lax", csrf_cookies[0])
+
+            self.assertEqual(body["user"]["role"], "governor")
+            self.assertEqual(body["user"]["name"], "عطوفة المتصرف")
+            self.assertIn("police_complaints", body["user"]["accessible_tools"])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+if __name__ == "__main__":
+    unittest.main()

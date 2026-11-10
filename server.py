@@ -334,6 +334,12 @@ def backup_db_to_json(conn=None):
             'chat_messages': rows_to_list(conn.execute("SELECT * FROM mat_chat_messages").fetchall()),
             'activity_log': rows_to_list(conn.execute("SELECT * FROM mat_activity_log").fetchall()),
             'audit_logs': rows_to_list(conn.execute("SELECT * FROM mat_audit_logs").fetchall()),
+            'complaint_scans': rows_to_list(conn.execute("SELECT * FROM mat_complaint_scans").fetchall()),
+            'complaint_workflow_log': rows_to_list(conn.execute("SELECT * FROM mat_complaint_workflow_log").fetchall()),
+            # Never export api_key secrets into data_backup.json
+            'llm_settings': rows_to_list(conn.execute(
+                "SELECT id, provider, model_name, api_base_url, is_enabled, updated_by_id, updated_at FROM mat_llm_settings"
+            ).fetchall()),
             'updated_at': datetime.now().isoformat()
         }
         with open(BACKUP_JSON_PATH, 'w', encoding='utf-8') as f:
@@ -359,13 +365,15 @@ def restore_db_from_json(conn):
             existing = conn.execute("SELECT id FROM mat_officers WHERE username = ?", (o['username'],)).fetchone()
             if not existing:
                 conn.execute("""
-                    INSERT INTO mat_officers (id, name, username, password_hash, salt, role, accessible_tools, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (o.get('id'), o.get('name'), o.get('username'), o.get('password_hash'), o.get('salt'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('created_at'), o.get('updated_at')))
+                    INSERT INTO mat_officers (id, name, username, password_hash, salt, role, accessible_tools, is_active, created_at, updated_at, fcm_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (o.get('id'), o.get('name'), o.get('username'), o.get('password_hash'), o.get('salt'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('created_at'), o.get('updated_at'), o.get('fcm_token')))
             else:
                 conn.execute("""
-                    UPDATE mat_officers SET name = ?, role = ?, accessible_tools = ?, is_active = ?, updated_at = ? WHERE username = ?
-                """, (o.get('name'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('updated_at'), o['username']))
+                    UPDATE mat_officers
+                    SET name = ?, role = ?, accessible_tools = ?, is_active = ?, updated_at = ?, fcm_token = COALESCE(?, fcm_token)
+                    WHERE username = ?
+                """, (o.get('name'), o.get('role'), o.get('accessible_tools'), o.get('is_active', 1), o.get('updated_at'), o.get('fcm_token'), o['username']))
 
         # Restore Simple Appointments
         appts = data.get('simple_appointments', [])
@@ -397,14 +405,49 @@ def restore_db_from_json(conn):
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (l.get('id'), l.get('reserved_file_id'), l.get('from_officer_id'), l.get('to_officer_id'), l.get('status'), l.get('notes'), l.get('transferred_at')))
         # Restore Complaints
+        complaint_cols = (
+            'id', 'complaint_number', 'subject', 'complaint_type', 'status', 'priority', 'notes',
+            'assigned_officer_id', 'created_by_id', 'created_at', 'updated_at',
+            'paper_date', 'complainant_category', 'respondent_category', 'summary',
+            'has_signature', 'no_pending_lawsuit_declared', 'workflow_stage', 'is_minor_police_complaint',
+            'ai_provider', 'ai_model', 'ai_extracted_json', 'ai_analysis',
+            'ai_solution_recommendation', 'ai_recommended_action', 'ai_confidence',
+            'officer_action', 'officer_notes', 'officer_reviewed_by_id', 'officer_reviewed_at',
+            'section_head_notes', 'section_recommended_action', 'section_head_id', 'section_head_at',
+            'governor_decision', 'governor_final_action', 'governor_notes', 'governor_id', 'governor_decided_at',
+            'nearest_station', 'police_directorate', 'liwa_name', 'station_lat', 'station_lon',
+            'linked_appointment_id', 'linked_file_number', 'last_followup_at',
+        )
+        complaint_defaults = {
+            'complaint_type': 'عام',
+            'status': 'جديد',
+            'priority': 'عادي',
+            'complainant_category': 'مواطن',
+            'respondent_category': 'مواطن',
+            'has_signature': 0,
+            'no_pending_lawsuit_declared': 0,
+            'workflow_stage': 'draft_scan',
+            'is_minor_police_complaint': 1,
+        }
+        complaint_cols_sql = ', '.join(complaint_cols)
+        complaint_placeholders = ', '.join(['?'] * len(complaint_cols))
         complaints = data.get('complaints', [])
         for c in complaints:
             existing = conn.execute("SELECT id FROM mat_complaints WHERE id = ?", (c['id'],)).fetchone()
             if not existing:
-                conn.execute("""
-                    INSERT INTO mat_complaints (id, complaint_number, subject, complaint_type, status, priority, notes, assigned_officer_id, created_by_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (c.get('id'), c.get('complaint_number'), c.get('subject'), c.get('complaint_type'), c.get('status'), c.get('priority'), c.get('notes'), c.get('assigned_officer_id'), c.get('created_by_id'), c.get('created_at'), c.get('updated_at')))
+                vals = []
+                for col in complaint_cols:
+                    if col == 'last_followup_at':
+                        val = c.get('last_followup_at') or c.get('updated_at') or c.get('created_at')
+                    else:
+                        val = c.get(col)
+                        if val is None and col in complaint_defaults:
+                            val = complaint_defaults[col]
+                    vals.append(val)
+                conn.execute(
+                    f"INSERT INTO mat_complaints ({complaint_cols_sql}) VALUES ({complaint_placeholders})",
+                    vals
+                )
 
         # Restore Parties
         parties = data.get('parties', [])
@@ -412,9 +455,9 @@ def restore_db_from_json(conn):
             existing = conn.execute("SELECT id FROM mat_parties WHERE id = ?", (p['id'],)).fetchone()
             if not existing:
                 conn.execute("""
-                    INSERT INTO mat_parties (id, complaint_id, party_type, name, phone, national_id, address, notes, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (p.get('id'), p.get('complaint_id'), p.get('party_type'), p.get('name'), p.get('phone'), p.get('national_id'), p.get('address'), p.get('notes'), p.get('created_at')))
+                    INSERT INTO mat_parties (id, complaint_id, party_type, party_category, name, phone, national_id, address, notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (p.get('id'), p.get('complaint_id'), p.get('party_type'), p.get('party_category') or 'مواطن', p.get('name'), p.get('phone'), p.get('national_id'), p.get('address'), p.get('notes'), p.get('created_at')))
 
         # Restore Appointments
         appointments = data.get('appointments', [])
@@ -476,9 +519,66 @@ def restore_db_from_json(conn):
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (au.get('id'), au.get('action'), au.get('resource_id'), au.get('actor_id'), au.get('timestamp'), au.get('details')))
 
+        # Restore Complaint Scans
+        for sc in data.get('complaint_scans', []):
+            existing = conn.execute("SELECT id FROM mat_complaint_scans WHERE id = ?", (sc['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_complaint_scans (id, complaint_id, stored_filename, original_filename, mime_type, file_size, page_order, ocr_raw_text, uploaded_by_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (sc.get('id'), sc.get('complaint_id'), sc.get('stored_filename'), sc.get('original_filename'), sc.get('mime_type'), sc.get('file_size', 0), sc.get('page_order', 1), sc.get('ocr_raw_text'), sc.get('uploaded_by_id'), sc.get('created_at')))
+
+        # Restore Complaint Workflow Log
+        for wl in data.get('complaint_workflow_log', []):
+            existing = conn.execute("SELECT id FROM mat_complaint_workflow_log WHERE id = ?", (wl['id'],)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_complaint_workflow_log (id, complaint_id, actor_id, actor_role, stage_from, stage_to, action_taken, notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (wl.get('id'), wl.get('complaint_id'), wl.get('actor_id'), wl.get('actor_role'), wl.get('stage_from'), wl.get('stage_to'), wl.get('action_taken', ''), wl.get('notes'), wl.get('created_at')))
+
+        # Restore LLM Settings (never overwrite existing api_key with empty)
+        for ls in data.get('llm_settings', []):
+            row_id = ls.get('id', 1)
+            existing = conn.execute("SELECT id FROM mat_llm_settings WHERE id = ?", (row_id,)).fetchone()
+            if not existing:
+                conn.execute("""
+                    INSERT INTO mat_llm_settings (id, provider, model_name, api_base_url, api_key, is_enabled, updated_by_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (row_id, ls.get('provider', 'gemini'), ls.get('model_name', 'gemini-2.5-flash'), ls.get('api_base_url', ''), '', ls.get('is_enabled', 1), ls.get('updated_by_id'), ls.get('updated_at')))
+            else:
+                conn.execute("""
+                    UPDATE mat_llm_settings
+                    SET provider = ?, model_name = ?, api_base_url = ?, is_enabled = ?, updated_by_id = ?, updated_at = ?
+                    WHERE id = ?
+                """, (ls.get('provider', 'gemini'), ls.get('model_name', 'gemini-2.5-flash'), ls.get('api_base_url', ''), ls.get('is_enabled', 1), ls.get('updated_by_id'), ls.get('updated_at'), row_id))
+
+        # Legacy pre-1.46 backups lacked complaint_scans and governor; ensure admin/officer retain police_complaints
+        if 'complaint_scans' not in data:
+            conn.execute("""
+                UPDATE mat_officers
+                SET accessible_tools = CASE
+                    WHEN accessible_tools IS NULL OR accessible_tools = '' THEN 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'
+                    ELSE accessible_tools || ',police_complaints'
+                END
+                WHERE role IN ('admin', 'officer', 'governor')
+                  AND (accessible_tools IS NULL OR accessible_tools = '' OR accessible_tools NOT LIKE '%police_complaints%')
+            """)
+
         conn.commit()
     except Exception as e:
         print(f"Error restoring DB from JSON backup: {e}")
+
+
+def _ensure_table_columns(cursor, table_name, column_defs):
+    """Add any missing columns to an existing SQLite table safely."""
+    existing_cols = {row[1] for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    added = []
+    for col_name, col_type in column_defs:
+        if col_name not in existing_cols:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+            added.append(col_name)
+    return added
 
 
 def init_db():
@@ -545,11 +645,12 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             salt TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'officer', 'caller')),
-            accessible_tools TEXT DEFAULT 'mat_complaints,finder',
+            role TEXT NOT NULL CHECK(role IN ('admin', 'officer', 'caller', 'governor')),
+            accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat',
             is_active INTEGER DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+            fcm_token TEXT
         );
 
         CREATE TABLE IF NOT EXISTS mat_complaints (
@@ -563,19 +664,92 @@ def init_db():
             assigned_officer_id INTEGER REFERENCES mat_officers(id),
             created_by_id INTEGER REFERENCES mat_officers(id),
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+            paper_date TEXT,
+            complainant_category TEXT DEFAULT 'مواطن',
+            respondent_category TEXT DEFAULT 'مواطن',
+            summary TEXT,
+            has_signature INTEGER DEFAULT 0,
+            no_pending_lawsuit_declared INTEGER DEFAULT 0,
+            workflow_stage TEXT DEFAULT 'draft_scan',
+            is_minor_police_complaint INTEGER DEFAULT 1,
+            ai_provider TEXT,
+            ai_model TEXT,
+            ai_extracted_json TEXT,
+            ai_analysis TEXT,
+            ai_solution_recommendation TEXT,
+            ai_recommended_action TEXT,
+            ai_confidence REAL,
+            officer_action TEXT,
+            officer_notes TEXT,
+            officer_reviewed_by_id INTEGER REFERENCES mat_officers(id),
+            officer_reviewed_at TEXT,
+            section_head_notes TEXT,
+            section_recommended_action TEXT,
+            section_head_id INTEGER REFERENCES mat_officers(id),
+            section_head_at TEXT,
+            governor_decision TEXT,
+            governor_final_action TEXT,
+            governor_notes TEXT,
+            governor_id INTEGER REFERENCES mat_officers(id),
+            governor_decided_at TEXT,
+            nearest_station TEXT,
+            police_directorate TEXT,
+            liwa_name TEXT,
+            station_lat REAL,
+            station_lon REAL,
+            linked_appointment_id INTEGER,
+            linked_file_number TEXT,
+            last_followup_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS mat_parties (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             complaint_id INTEGER NOT NULL REFERENCES mat_complaints(id) ON DELETE CASCADE,
             party_type TEXT NOT NULL CHECK(party_type IN ('شاكي', 'مشتكى_عليه')),
+            party_category TEXT DEFAULT 'مواطن',
             name TEXT NOT NULL,
             phone TEXT,
             national_id TEXT,
             address TEXT,
             notes TEXT,
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS mat_complaint_scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            complaint_id INTEGER REFERENCES mat_complaints(id) ON DELETE CASCADE,
+            stored_filename TEXT NOT NULL,
+            original_filename TEXT,
+            mime_type TEXT NOT NULL,
+            file_size INTEGER DEFAULT 0,
+            page_order INTEGER DEFAULT 1,
+            ocr_raw_text TEXT,
+            uploaded_by_id INTEGER REFERENCES mat_officers(id),
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS mat_complaint_workflow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            complaint_id INTEGER NOT NULL REFERENCES mat_complaints(id) ON DELETE CASCADE,
+            actor_id INTEGER REFERENCES mat_officers(id),
+            actor_role TEXT,
+            stage_from TEXT,
+            stage_to TEXT,
+            action_taken TEXT NOT NULL DEFAULT '',
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS mat_llm_settings (
+            id INTEGER PRIMARY KEY,
+            provider TEXT NOT NULL DEFAULT 'gemini',
+            model_name TEXT DEFAULT 'gemini-2.5-flash',
+            api_base_url TEXT DEFAULT '',
+            api_key TEXT DEFAULT '',
+            is_enabled INTEGER DEFAULT 1,
+            updated_by_id INTEGER REFERENCES mat_officers(id),
+            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS mat_appointments (
@@ -694,43 +868,143 @@ def init_db():
     ''')
 
     # Run DB Migrations for existing databases
+    migrated_officers = False
+    migrated_complaints = False
     try:
+        # Rebuild legacy mat_officers if CHECK constraint excludes 'governor'
+        officers_ddl_row = c.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='mat_officers'"
+        ).fetchone()
+        if officers_ddl_row and officers_ddl_row[0] and "'governor'" not in officers_ddl_row[0]:
+            existing_officer_cols = [row[1] for row in c.execute("PRAGMA table_info(mat_officers)").fetchall()]
+            target_officer_cols = [
+                'id', 'name', 'username', 'password_hash', 'salt', 'role',
+                'accessible_tools', 'is_active', 'created_at', 'updated_at', 'fcm_token',
+            ]
+            common_officer_cols = [col for col in target_officer_cols if col in existing_officer_cols]
+            cols_sql = ', '.join(common_officer_cols)
+            # PRAGMA foreign_keys=OFF only takes effect outside an active transaction
+            conn.commit()
+            c.execute("PRAGMA foreign_keys=OFF")
+            try:
+                c.execute("BEGIN")
+                c.execute("""
+                    CREATE TABLE mat_officers_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        username TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        salt TEXT NOT NULL,
+                        role TEXT NOT NULL CHECK(role IN ('admin', 'officer', 'caller', 'governor')),
+                        accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat',
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                        fcm_token TEXT
+                    )
+                """)
+                c.execute(f"INSERT INTO mat_officers_new ({cols_sql}) SELECT {cols_sql} FROM mat_officers")
+                c.execute("DROP TABLE mat_officers")
+                c.execute("ALTER TABLE mat_officers_new RENAME TO mat_officers")
+                conn.commit()
+                migrated_officers = True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                c.execute("PRAGMA foreign_keys=ON")
+
         # Check if mat_audit_logs exists
         c.execute("CREATE TABLE IF NOT EXISTS mat_audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, resource_id TEXT NOT NULL, actor_id INTEGER REFERENCES mat_officers(id), timestamp TEXT DEFAULT (datetime('now', 'localtime')), details TEXT)")
 
         # Check if mat_file_custody_log exists and has status column
         c.execute("CREATE TABLE IF NOT EXISTS mat_file_custody_log (id INTEGER PRIMARY KEY AUTOINCREMENT, reserved_file_id INTEGER NOT NULL REFERENCES mat_reserved_files(id) ON DELETE CASCADE, from_officer_id INTEGER REFERENCES mat_officers(id), to_officer_id INTEGER NOT NULL REFERENCES mat_officers(id), status TEXT DEFAULT 'accepted', notes TEXT, transferred_at TEXT DEFAULT (datetime('now', 'localtime')))")
-        cols = [row[1] for row in c.execute("PRAGMA table_info(mat_file_custody_log)").fetchall()]
-        if 'status' not in cols:
-            c.execute("ALTER TABLE mat_file_custody_log ADD COLUMN status TEXT DEFAULT 'accepted'")
+        _ensure_table_columns(c, 'mat_file_custody_log', [('status', "TEXT DEFAULT 'accepted'")])
 
         # Check if accessible_tools and fcm_token exist in mat_officers
         cols = [row[1] for row in c.execute("PRAGMA table_info(mat_officers)").fetchall()]
         if 'accessible_tools' not in cols:
-            c.execute("ALTER TABLE mat_officers ADD COLUMN accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,file_reservations,chat'")
+            c.execute("ALTER TABLE mat_officers ADD COLUMN accessible_tools TEXT DEFAULT 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'")
         else:
-            # Update existing users to have dashboard, file_reservations, and chat if missing
+            # Update existing users to have dashboard and chat if missing
             c.execute("UPDATE mat_officers SET accessible_tools = 'dashboard,' || accessible_tools WHERE accessible_tools NOT LIKE '%dashboard%' AND accessible_tools IS NOT NULL AND accessible_tools != ''")
             c.execute("UPDATE mat_officers SET accessible_tools = accessible_tools || ',chat' WHERE accessible_tools NOT LIKE '%chat%' AND accessible_tools IS NOT NULL AND accessible_tools != ''")
         if 'fcm_token' not in cols:
             c.execute("ALTER TABLE mat_officers ADD COLUMN fcm_token TEXT")
 
         # Check if last_chat_seen exists in mat_sessions
-        sess_cols = [row[1] for row in c.execute("PRAGMA table_info(mat_sessions)").fetchall()]
-        if 'last_chat_seen' not in sess_cols:
-            c.execute("ALTER TABLE mat_sessions ADD COLUMN last_chat_seen TEXT")
+        _ensure_table_columns(c, 'mat_sessions', [('last_chat_seen', 'TEXT')])
 
         # Check mat_appointments table
-        cols = [row[1] for row in c.execute("PRAGMA table_info(mat_appointments)").fetchall()]
-        if 'requested_by_id' not in cols:
-            c.execute("ALTER TABLE mat_appointments ADD COLUMN requested_by_id INTEGER REFERENCES mat_officers(id)")
-        if 'parent_appointment_id' not in cols:
-            c.execute("ALTER TABLE mat_appointments ADD COLUMN parent_appointment_id INTEGER REFERENCES mat_appointments(id)")
+        _ensure_table_columns(c, 'mat_appointments', [
+            ('requested_by_id', 'INTEGER REFERENCES mat_officers(id)'),
+            ('parent_appointment_id', 'INTEGER REFERENCES mat_appointments(id)'),
+        ])
 
         # Check mat_simple_appointments table
-        cols = [row[1] for row in c.execute("PRAGMA table_info(mat_simple_appointments)").fetchall()]
-        if 'requested_by_id' not in cols:
-            c.execute("ALTER TABLE mat_simple_appointments ADD COLUMN requested_by_id INTEGER REFERENCES mat_officers(id)")
+        _ensure_table_columns(c, 'mat_simple_appointments', [
+            ('requested_by_id', 'INTEGER REFERENCES mat_officers(id)'),
+        ])
+
+        # Check mat_parties extended columns
+        _ensure_table_columns(c, 'mat_parties', [
+            ('party_category', "TEXT DEFAULT 'مواطن'"),
+        ])
+
+        # Check mat_complaints extended columns
+        added_complaint_cols = _ensure_table_columns(c, 'mat_complaints', [
+            ('paper_date', 'TEXT'),
+            ('complainant_category', "TEXT DEFAULT 'مواطن'"),
+            ('respondent_category', "TEXT DEFAULT 'مواطن'"),
+            ('summary', 'TEXT'),
+            ('has_signature', 'INTEGER DEFAULT 0'),
+            ('no_pending_lawsuit_declared', 'INTEGER DEFAULT 0'),
+            ('workflow_stage', "TEXT DEFAULT 'draft_scan'"),
+            ('is_minor_police_complaint', 'INTEGER DEFAULT 1'),
+            ('ai_provider', 'TEXT'),
+            ('ai_model', 'TEXT'),
+            ('ai_extracted_json', 'TEXT'),
+            ('ai_analysis', 'TEXT'),
+            ('ai_solution_recommendation', 'TEXT'),
+            ('ai_recommended_action', 'TEXT'),
+            ('ai_confidence', 'REAL'),
+            ('officer_action', 'TEXT'),
+            ('officer_notes', 'TEXT'),
+            ('officer_reviewed_by_id', 'INTEGER REFERENCES mat_officers(id)'),
+            ('officer_reviewed_at', 'TEXT'),
+            ('section_head_notes', 'TEXT'),
+            ('section_recommended_action', 'TEXT'),
+            ('section_head_id', 'INTEGER REFERENCES mat_officers(id)'),
+            ('section_head_at', 'TEXT'),
+            ('governor_decision', 'TEXT'),
+            ('governor_final_action', 'TEXT'),
+            ('governor_notes', 'TEXT'),
+            ('governor_id', 'INTEGER REFERENCES mat_officers(id)'),
+            ('governor_decided_at', 'TEXT'),
+            ('nearest_station', 'TEXT'),
+            ('police_directorate', 'TEXT'),
+            ('liwa_name', 'TEXT'),
+            ('station_lat', 'REAL'),
+            ('station_lon', 'REAL'),
+            ('linked_appointment_id', 'INTEGER'),
+            ('linked_file_number', 'TEXT'),
+            ('last_followup_at', 'TEXT'),
+        ])
+        if added_complaint_cols:
+            migrated_complaints = True
+            if 'last_followup_at' in added_complaint_cols:
+                c.execute("""
+                    UPDATE mat_complaints
+                    SET last_followup_at = COALESCE(updated_at, created_at, datetime('now', 'localtime'))
+                    WHERE last_followup_at IS NULL
+                """)
+
+        # Create indexes on new columns/tables AFTER ALTER TABLE migrations
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mat_complaints_stage ON mat_complaints(workflow_stage)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mat_complaints_followup ON mat_complaints(last_followup_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mat_complaint_scans_cid ON mat_complaint_scans(complaint_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mat_complaint_log_cid ON mat_complaint_workflow_log(complaint_id)")
+
         # Auto-update status of parent mat_appointments to 'مُؤجل' if they have a branched appointment
         c.execute("""
             UPDATE mat_simple_appointments 
@@ -750,18 +1024,19 @@ def init_db():
     existing = c.execute("SELECT COUNT(*) as cnt FROM mat_officers").fetchone()
     if existing['cnt'] == 0:
         defaults = [
-            ('عروة', 'orwa', '12345', 'admin'),
-            ('ايهاب', 'ehab', '12345', 'officer'),
-            ('سلطان', 'sultan', '12345', 'officer'),
-            ('ابوالزيت', 'abualzait', '12345', 'officer'),
-            ('رعد', 'raad', '12345', 'caller'),
+            ('عروة', 'orwa', '12345', 'admin', 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'),
+            ('ايهاب', 'ehab', '12345', 'officer', 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'),
+            ('سلطان', 'sultan', '12345', 'officer', 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'),
+            ('ابوالزيت', 'abualzait', '12345', 'officer', 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'),
+            ('رعد', 'raad', '12345', 'caller', 'dashboard,mat_complaints,finder,chat'),
+            ('عطوفة المتصرف', 'governor', '12345', 'governor', 'dashboard,police_complaints,finder,chat'),
         ]
-        for name, username, password, role in defaults:
+        for name, username, password, role, tools in defaults:
             salt = uuid.uuid4().hex
             pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
             c.execute(
-                "INSERT INTO mat_officers (name, username, password_hash, salt, role) VALUES (?,?,?,?,?)",
-                (name, username, pw_hash, salt, role)
+                "INSERT INTO mat_officers (name, username, password_hash, salt, role, accessible_tools) VALUES (?,?,?,?,?,?)",
+                (name, username, pw_hash, salt, role, tools)
             )
         print("┌─────────────────────────────────────────────────┐")
         print("│ ✅ تم إنشاء الحسابات الافتراضية:                │")
@@ -771,10 +1046,35 @@ def init_db():
         print("│  ضابط ٢:    سلطان (sultan)                         │")
         print("│  ضابط ٣:    ابوالزيت (abualzait)                   │")
         print("│  الاتصال:   رعد (raad)                             │")
+        print("│  المتصرف:   عطوفة المتصرف (governor)              │")
         print("│                                                   │")
         print("└─────────────────────────────────────────────────┘")
 
     restore_db_from_json(conn)
+
+    # Ensure governor account exists on upgraded/existing DBs and grant police_complaints during migration
+    gov_exists = c.execute("SELECT id FROM mat_officers WHERE username = 'governor'").fetchone()
+    seeded_governor = False
+    if not gov_exists:
+        salt = uuid.uuid4().hex
+        pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', b'12345', salt.encode(), 100000).hex()
+        c.execute(
+            "INSERT INTO mat_officers (name, username, password_hash, salt, role, accessible_tools) VALUES (?,?,?,?,?,?)",
+            ('عطوفة المتصرف', 'governor', pw_hash, salt, 'governor', 'dashboard,police_complaints,finder,chat')
+        )
+        seeded_governor = True
+
+    if migrated_officers or migrated_complaints or seeded_governor:
+        c.execute("""
+            UPDATE mat_officers
+            SET accessible_tools = CASE
+                WHEN accessible_tools IS NULL OR accessible_tools = '' THEN 'dashboard,mat_complaints,finder,file_reservations,police_complaints,chat'
+                ELSE accessible_tools || ',police_complaints'
+            END
+            WHERE role IN ('admin', 'officer', 'governor')
+              AND (accessible_tools IS NULL OR accessible_tools = '' OR accessible_tools NOT LIKE '%police_complaints%')
+        """)
+
     conn.commit()
     conn.close()
     backup_db_to_json()
@@ -788,12 +1088,14 @@ def create_session(user_id, username, role, name, accessible_tools):
     """Create a new session and return the token."""
     token = uuid.uuid4().hex
     conn = get_db()
-    conn.execute(
-        "INSERT INTO mat_sessions (token, user_id, username, role, name, accessible_tools) VALUES (?, ?, ?, ?, ?, ?)",
-        (token, user_id, username, role, name, accessible_tools)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "INSERT INTO mat_sessions (token, user_id, username, role, name, accessible_tools) VALUES (?, ?, ?, ?, ?, ?)",
+            (token, user_id, username, role, name, accessible_tools)
+        )
+        conn.commit()
+    finally:
+        conn.close()
     return token
 
 
@@ -1176,22 +1478,42 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         conn = get_db()
-        user = dict_from_row(conn.execute(
-            "SELECT * FROM mat_officers WHERE username = ? AND is_active = 1", (username,)
-        ).fetchone())
-        conn.close()
-
-        if not user:
-            default_names = {
-                'orwa': ('عروة', 'admin'),
-                'ehab': ('ايهاب', 'officer'),
-                'sultan': ('سلطان', 'officer'),
-                'abualzait': ('ابوالزيت', 'officer'),
-                'raad': ('رعد', 'caller')
-            }
-            if username in default_names:
-                name, role = default_names[username]
-                user = {'id': 99, 'username': username, 'name': name, 'role': role, 'accessible_tools': 'dashboard,complaints,finder,file_reservations,chat'}
+        try:
+            existing_row = dict_from_row(conn.execute(
+                "SELECT * FROM mat_officers WHERE username = ?", (username,)
+            ).fetchone())
+            if existing_row:
+                if not existing_row.get('is_active'):
+                    self.send_json({'error': 'الحساب غير مفعّل'}, 401)
+                    return
+                user = existing_row
+            else:
+                user = None
+                default_names = {
+                    'orwa': ('عروة', 'admin'),
+                    'ehab': ('ايهاب', 'officer'),
+                    'sultan': ('سلطان', 'officer'),
+                    'abualzait': ('ابوالزيت', 'officer'),
+                    'raad': ('رعد', 'caller'),
+                    'governor': ('عطوفة المتصرف', 'governor'),
+                }
+                if username in default_names:
+                    name, role = default_names[username]
+                    default_tools = (
+                        'dashboard,police_complaints,finder,chat'
+                        if role == 'governor'
+                        else 'dashboard,complaints,finder,file_reservations,police_complaints,chat'
+                    )
+                    salt = uuid.uuid4().hex
+                    pw_hash = 'pbkdf2:' + hashlib.pbkdf2_hmac('sha256', b'12345', salt.encode(), 100000).hex()
+                    cur = conn.execute(
+                        "INSERT INTO mat_officers (name, username, password_hash, salt, role, accessible_tools) VALUES (?,?,?,?,?,?)",
+                        (name, username, pw_hash, salt, role, default_tools)
+                    )
+                    conn.commit()
+                    user = {'id': cur.lastrowid, 'username': username, 'name': name, 'role': role, 'accessible_tools': default_tools}
+        finally:
+            conn.close()
 
         if not user:
             self.send_json({'error': 'المستخدم غير موجود'}, 401)
@@ -1213,11 +1535,16 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                 pass
 
         effective_role = 'admin' if is_admin_mode else user['role']
-        effective_tools = 'dashboard,complaints,finder,file_reservations,chat,admin_permissions' if is_admin_mode else (user.get('accessible_tools') or 'dashboard,complaints,finder,file_reservations,chat')
+        effective_tools = (
+            'dashboard,complaints,finder,file_reservations,police_complaints,chat,admin_permissions'
+            if is_admin_mode
+            else (user.get('accessible_tools') or 'dashboard,complaints,finder,file_reservations,police_complaints,chat')
+        )
 
         token = create_session(user['id'], user['username'], effective_role, user['name'], effective_tools)
         csrf_token_val = os.urandom(32).hex()
-        cookie1 = f"session={token}; Path=/; SameSite=Lax"
+        # TODO(security): add Secure flag when terminated behind HTTPS/TLS in production (LAN HTTP deployment)
+        cookie1 = f"session={token}; Path=/; HttpOnly; SameSite=Lax"
         cookie2 = f"csrf_token={csrf_token_val}; Path=/; SameSite=Lax"
 
         self.send_json({

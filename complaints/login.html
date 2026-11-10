@@ -324,6 +324,12 @@
                         <span class="avatar-name">رعد</span>
                         <span class="avatar-role">ضابط اتصال</span>
                     </button>
+                    <!-- Governor -->
+                    <button type="button" class="avatar-btn" onclick="selectUser('governor', this)">
+                        <div class="avatar-circle" style="background:#FEF3C7; color:#B45309;">🏛️</div>
+                        <span class="avatar-name">عطوفة المتصرف</span>
+                        <span class="avatar-role">الحاكم الإداري</span>
+                    </button>
                 </div>
 
                 <div class="secret-input-wrapper" style="margin-top: 1rem;">
@@ -349,7 +355,8 @@
             'ehab': { username: 'ehab', name: 'ايهاب', role: 'officer' },
             'sultan': { username: 'sultan', name: 'سلطان', role: 'officer' },
             'abualzait': { username: 'abualzait', name: 'ابوالزيت', role: 'officer' },
-            'raad': { username: 'raad', name: 'رعد', role: 'caller' }
+            'raad': { username: 'raad', name: 'رعد', role: 'caller' },
+            'governor': { username: 'governor', name: 'عطوفة المتصرف', role: 'governor' }
         };
 
         function selectUser(username, btnEl) {
@@ -382,6 +389,7 @@
                 localStorage.removeItem('adminModeActive');
             }
 
+            let serverUser = null;
             try {
                 const csrfMatch = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
                 const csrfToken = csrfMatch ? csrfMatch[1] : '';
@@ -396,12 +404,12 @@
                 if (res.ok) {
                     const data = await res.json();
                     if (data.user) {
-                        localStorage.setItem('mat_current_user', JSON.stringify(data.user));
+                        serverUser = data.user;
                     }
                 }
             } catch (err) {}
 
-            localStorage.setItem('mat_current_user', JSON.stringify(user));
+            localStorage.setItem('mat_current_user', JSON.stringify(serverUser || user));
             window.location.href = '/complaints/app';
         }
     </script>

@@ -11,6 +11,29 @@ const matConfig = {
 
 let currentUser = null;
 
+// ── Security & Tool Parsing Helpers ───────────────────────────
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+window.escapeHtml = escapeHtml;
+
+function parseToolsList(tools) {
+    if (Array.isArray(tools)) {
+        return tools.map(t => String(t).trim()).filter(Boolean);
+    }
+    if (typeof tools === 'string') {
+        return tools.split(',').map(t => t.trim()).filter(Boolean);
+    }
+    return [];
+}
+window.parseToolsList = parseToolsList;
+
 // ── Smart API Backend Routing & CSRF Setup ────────────────────
 const BACKEND_HOST = (typeof window !== 'undefined' && (window.location.hostname.includes('hf.space') || window.location.hostname.includes('github.io'))) 
     ? 'https://mat-toolkit-436287854556.europe-west1.run.app' 
@@ -56,8 +79,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('apptFilterFrom').value = todayStr;
     }
 
-    // Default tab: Dashboard for all users
-    switchTab('dashboard');
+    // Default tab: Governor lands immediately on Police Complaints approval queue
+    if (user.role === 'governor') {
+        switchTab('police-complaints');
+    } else {
+        switchTab('dashboard');
+    }
     
     // Start notifications & online users polling & keep-alive ping
     startNotificationsPolling();
@@ -113,7 +140,8 @@ function renderUserInfo() {
     const roleLabels = {
         'admin': 'رئيس القسم (مشرف)',
         'officer': 'ضابط / مستخدم مواعيد',
-        'caller': 'ضابط اتصالات'
+        'caller': 'ضابط اتصالات',
+        'governor': 'الحاكم الإداري (المتصرف)'
     };
     let roleText = roleLabels[currentUser.role] || currentUser.role;
     if (currentUser.username === 'orwa') {
@@ -129,11 +157,25 @@ function renderUserInfo() {
     const userRoleBadgeSidebar = document.getElementById('userRoleBadgeSidebar');
     if (userRoleBadgeSidebar) userRoleBadgeSidebar.textContent = roleText;
 
+    const tools = parseToolsList(currentUser.accessible_tools);
+    const isAdmin = currentUser.role === 'admin' || localStorage.getItem('adminModeActive') === 'true';
+
     // Toggle Chat Button Top Bar based on permission
     const topChatBtn = document.getElementById('meetingRoomTopBtn');
     if (topChatBtn) {
-        const hasChatAccess = currentUser.role === 'admin' || (currentUser.accessible_tools || '').includes('chat');
+        const hasChatAccess = isAdmin || tools.includes('chat');
         topChatBtn.style.display = hasChatAccess ? 'inline-flex' : 'none';
+    }
+
+    // Toggle Police Complaints top action buttons based on role
+    const llmBtn = document.getElementById('pcLlmSettingsBtn');
+    if (llmBtn) {
+        llmBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+    }
+    const scannerBtn = document.getElementById('pcToggleScannerBtn');
+    if (scannerBtn) {
+        const canIntake = isAdmin || currentUser.role === 'officer';
+        scannerBtn.style.display = canIntake ? 'inline-flex' : 'none';
     }
 
     // Admin Mode Styling Check
@@ -145,27 +187,21 @@ function renderUserInfo() {
         
         const badge = document.getElementById('userRoleBadge');
         if (badge) {
-            badge.innerHTML = '👑 وضع المشرف السري';
+            badge.textContent = '👑 وضع المشرف السري';
             badge.style.background = '#FFD700';
             badge.style.color = '#000000';
         }
         if (userRoleBadgeSidebar) {
-            userRoleBadgeSidebar.innerHTML = '👑 وضع المشرف السري';
+            userRoleBadgeSidebar.textContent = '👑 وضع المشرف السري';
             userRoleBadgeSidebar.style.background = '#FFD700';
             userRoleBadgeSidebar.style.color = '#000000';
         }
     }
 
-    if (currentUser.role === 'admin') {
+    if (isAdmin) {
         const adminBtn = document.getElementById('officersTabBtn');
         if (adminBtn) adminBtn.style.display = 'flex';
     }
-
-    let tools = currentUser.accessible_tools || [];
-    if (typeof tools === 'string') {
-        tools = tools.split(',').map(t => t.trim());
-    }
-    const isAdmin = currentUser.role === 'admin' || localStorage.getItem('adminModeActive') === 'true';
 
     renderDynamicNavigation(tools, isAdmin, currentUser.role);
 }
@@ -174,11 +210,10 @@ function renderDynamicNavigation(tools, isAdmin, role) {
     const navMenu = document.getElementById('dynamicSidebarMenu');
     if (!navMenu) return;
 
-    if (typeof tools === 'string') {
-        tools = tools.split(',').map(t => t.trim());
-    }
+    tools = parseToolsList(tools);
 
     const hasDashboard = isAdmin || tools.includes('dashboard');
+    const hasPoliceComplaints = isAdmin || role === 'governor' || tools.includes('police_complaints');
     const hasComplaints = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints');
     const hasFinder = isAdmin || tools.includes('finder') || tools.includes('stations');
     const hasFiles = isAdmin || tools.includes('file_reservations') || tools.includes('reservations');
@@ -194,8 +229,22 @@ function renderDynamicNavigation(tools, isAdmin, role) {
         html += `
             <div class="nav-group">
                 <div class="nav-sub-menu" style="display:flex;">
-                    <button class="nav-item active" onclick="switchTab('dashboard')" title="لوحة التحكم والملخص">
+                    <button class="nav-item ${role !== 'governor' ? 'active' : ''}" onclick="switchTab('dashboard')" title="لوحة التحكم والملخص">
                         <span class="nav-icon">📊</span><span class="nav-text">لوحة التحكم والملخص</span>
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    // Group 0.5: Smart Police Complaints & Administrative Governor Workflow
+    if (hasPoliceComplaints) {
+        toolsCount++;
+        toolsListHtml += `<li class="tool-card"><strong>${toolsCount}. الشكاوى الأمنية الذكية</strong> ⚖️</li>`;
+        html += `
+            <div class="nav-group">
+                <div class="nav-sub-menu" style="display:flex;">
+                    <button class="nav-item ${role === 'governor' ? 'active' : ''}" onclick="switchTab('police-complaints')" title="الشكاوى الأمنية الذكية">
+                        <span class="nav-icon">⚖️</span><span class="nav-text">الشكاوى الأمنية الذكية</span>
                     </button>
                 </div>
             </div>`;
@@ -350,7 +399,7 @@ function switchTab(tabId) {
     document.querySelectorAll('.nav-item, .tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
 
-    const activeBtn = Array.from(document.querySelectorAll('.nav-item, .tab')).find(b => b.getAttribute('onclick')?.includes(tabId));
+    const activeBtn = Array.from(document.querySelectorAll('.nav-item, .tab')).find(b => b.getAttribute('onclick')?.includes(`'${tabId}'`));
     if (activeBtn) {
         activeBtn.classList.add('active');
         const parentGroup = activeBtn.closest('.nav-group');
@@ -394,80 +443,95 @@ function switchTab(tabId) {
         loadAdminPermissions();
     } else if (tabId === 'reservations') {
         loadReservations();
+    } else if (tabId === 'police-complaints') {
+        if (typeof loadPoliceComplaintsTab === 'function') {
+            loadPoliceComplaintsTab();
+        }
     }
 }
 
 // ── Admin Permissions ───────────────────────────────────────
+function createPermissionSwitchCell(officerId, toolKey, isChecked) {
+    const td = document.createElement('td');
+    const label = document.createElement('label');
+    label.className = 'switch';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = Boolean(isChecked);
+    checkbox.addEventListener('change', () => togglePermission(officerId, toolKey, checkbox.checked));
+
+    const slider = document.createElement('span');
+    slider.className = 'slider round';
+
+    label.appendChild(checkbox);
+    label.appendChild(slider);
+    td.appendChild(label);
+    return td;
+}
+
 async function loadAdminPermissions() {
     const tbody = document.getElementById('permissionsTableBody');
     if (!tbody) return;
-    
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner spinner-dark"></div> جاري تحميل الصلاحيات...</td></tr>';
-    
+
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center"><div class="spinner spinner-dark"></div> جاري تحميل الصلاحيات...</td></tr>';
+
     try {
         const res = await fetch('/api/v1/mat/officers');
         if (!res.ok) throw new Error('Failed to fetch officers');
         const data = await res.json();
-        
+
         // Filter out disabled/inactive users so they do NOT appear on the permissions page
         const activeOfficers = ((data.officers || data.mat_officers) || []).filter(o => o.is_active);
 
         if (activeOfficers.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center">لا يوجد مستخدمين فعّالين لعرضهم</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center">لا يوجد مستخدمين فعّالين لعرضهم</td></tr>';
             return;
         }
-        
-        let html = '';
+
+        const fragment = document.createDocumentFragment();
         activeOfficers.forEach(o => {
-            const tools = o.accessible_tools || '';
-            const hasDashboard = tools.includes('dashboard');
-            const hasAppointments = tools.includes('complaints');
-            const hasStations = tools.includes('finder');
-            const hasFiles = tools.includes('file_reservations');
-            const hasChat = tools.includes('chat');
-            
-            html += `
-                <tr>
-                    <td class="fw-bold">${o.name} <br><small class="text-light">(${o.username})</small></td>
-                    <td>
-                        <label class="switch">
-                            <input type="checkbox" onchange="togglePermission(${o.id}, 'dashboard', this.checked)" ${hasDashboard ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                    </td>
-                    <td>
-                        <label class="switch">
-                            <input type="checkbox" onchange="togglePermission(${o.id}, 'complaints', this.checked)" ${hasAppointments ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                    </td>
-                    <td>
-                        <label class="switch">
-                            <input type="checkbox" onchange="togglePermission(${o.id}, 'finder', this.checked)" ${hasStations ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                    </td>
-                    <td>
-                        <label class="switch">
-                            <input type="checkbox" onchange="togglePermission(${o.id}, 'file_reservations', this.checked)" ${hasFiles ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                    </td>
-                    <td>
-                        <label class="switch">
-                            <input type="checkbox" onchange="togglePermission(${o.id}, 'chat', this.checked)" ${hasChat ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                    </td>
-                    <td><span class="badge badge-success">فعّال</span></td>
-                </tr>
-            `;
+            const toolsArr = parseToolsList(o.accessible_tools);
+            const hasDashboard = toolsArr.includes('dashboard');
+            const hasAppointments = toolsArr.includes('complaints') || toolsArr.includes('mat_complaints');
+            const hasStations = toolsArr.includes('finder');
+            const hasFiles = toolsArr.includes('file_reservations');
+            const hasPoliceComplaints = toolsArr.includes('police_complaints');
+            const hasChat = toolsArr.includes('chat');
+
+            const tr = document.createElement('tr');
+
+            const nameTd = document.createElement('td');
+            nameTd.className = 'fw-bold';
+            nameTd.appendChild(document.createTextNode(`${o.name || ''} `));
+            nameTd.appendChild(document.createElement('br'));
+            const small = document.createElement('small');
+            small.className = 'text-light';
+            small.textContent = `(${o.username || ''})`;
+            nameTd.appendChild(small);
+            tr.appendChild(nameTd);
+
+            tr.appendChild(createPermissionSwitchCell(o.id, 'dashboard', hasDashboard));
+            tr.appendChild(createPermissionSwitchCell(o.id, 'complaints', hasAppointments));
+            tr.appendChild(createPermissionSwitchCell(o.id, 'finder', hasStations));
+            tr.appendChild(createPermissionSwitchCell(o.id, 'file_reservations', hasFiles));
+            tr.appendChild(createPermissionSwitchCell(o.id, 'police_complaints', hasPoliceComplaints));
+            tr.appendChild(createPermissionSwitchCell(o.id, 'chat', hasChat));
+
+            const statusTd = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-success';
+            badge.textContent = 'فعّال';
+            statusTd.appendChild(badge);
+            tr.appendChild(statusTd);
+
+            fragment.appendChild(tr);
         });
-        
-        tbody.innerHTML = html;
-        
+
+        tbody.replaceChildren(fragment);
+
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-error">خطأ في جلب بيانات الصلاحيات</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-error">خطأ في جلب بيانات الصلاحيات</td></tr>';
     }
 }
 
@@ -479,11 +543,11 @@ async function togglePermission(officerId, toolName, isChecked) {
         const officer = officersList.find(o => o.id === officerId);
         if (!officer) return;
         
-        let toolsArray = officer.accessible_tools ? officer.accessible_tools.split(',').map(t => t.trim()).filter(Boolean) : [];
+        let toolsArray = parseToolsList(officer.accessible_tools);
         if (isChecked && !toolsArray.includes(toolName)) {
             toolsArray.push(toolName);
-        } else if (!isChecked && toolsArray.includes(toolName)) {
-            toolsArray = toolsArray.filter(t => t !== toolName);
+        } else if (!isChecked) {
+            toolsArray = toolsArray.filter(t => t !== toolName && !(toolName === 'complaints' && t === 'mat_complaints'));
         }
         
         const updatedTools = toolsArray.join(',');
@@ -902,11 +966,11 @@ async function loadSimpleDashboard() {
         const data = await res.json();
 
         // Check Permissions for Dynamic Dashboard UI Pruning
-        const tools = currentUser ? (currentUser.accessible_tools || '') : '';
+        const tools = parseToolsList(currentUser ? currentUser.accessible_tools : []);
         const isAdmin = currentUser && currentUser.role === 'admin';
         
         // Stats and Appointments widgets
-        const hasAppts = isAdmin || tools.includes('complaints') || (currentUser && currentUser.role === 'caller');
+        const hasAppts = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints') || (currentUser && currentUser.role === 'caller');
         const statsGrid = document.querySelector('.stats-grid');
         if (statsGrid) statsGrid.style.display = 'grid';
         
@@ -1294,12 +1358,47 @@ function focusSearch() {
     }
 }
 
+function createSearchSection(titleText, borderColor) {
+    const section = document.createElement('div');
+    section.className = 'search-section';
+    const heading = document.createElement('h4');
+    heading.style.color = borderColor;
+    heading.style.borderBottom = `2px solid ${borderColor}`;
+    heading.style.paddingBottom = '6px';
+    heading.style.marginBottom = '10px';
+    heading.style.display = 'flex';
+    heading.style.alignItems = 'center';
+    heading.style.gap = '8px';
+    heading.textContent = titleText;
+    section.appendChild(heading);
+    return section;
+}
+
+function createSearchTable(headers) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headers.forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    const tbody = document.createElement('tbody');
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    return { wrapper, tbody };
+}
+
 async function performSearch(query) {
     const container = document.getElementById('searchResultsContainer');
     const body = document.getElementById('searchResultsBody');
     if (!container || !body) return;
 
-    body.innerHTML = '<div class="text-center p-4"><div class="spinner spinner-dark mb-2"></div><br>جاري البحث الشامل في المواعيد، الملفات المحجوزة، الملاحظات، والمناطق...</div>';
+    body.innerHTML = '<div class="text-center p-4"><div class="spinner spinner-dark mb-2"></div><br>جاري البحث الشامل في المواعيد، الشكاوى الأمنية، الملفات المحجوزة، والمناطق...</div>';
     container.classList.add('active');
     container.style.display = 'block';
 
@@ -1308,153 +1407,371 @@ async function performSearch(query) {
         if (!res.ok) return;
         const data = await res.json();
 
-        const hasAppts = data.simple_appointments && data.simple_appointments.length > 0;
-        const hasFiles = data.files && data.files.length > 0;
-        const hasLocations = data.locations && data.locations.length > 0;
-        const hasPersons = data.persons && data.persons.length > 0;
-        const hasComplaints = data.complaints && data.complaints.length > 0;
+        const simpleAppts = data.simple_appointments || data.mat_simple_appointments || [];
+        const policeComplaints = data.police_complaints || [];
+        const filesList = data.files || [];
+        const locationsList = data.locations || [];
+        const personsList = data.persons || [];
+        const complaintsList = data.complaints || data.mat_complaints || [];
 
-        if (!hasAppts && !hasFiles && !hasLocations && !hasPersons && !hasComplaints) {
-            body.innerHTML = `<div class="empty-state p-4 text-center"><div class="empty-icon" style="font-size: 2rem;">🔍</div><p>لم يتم العثور على أي نتائج مطابقة لـ: "<strong>${query}</strong>"</p></div>`;
+        const hasAppts = simpleAppts.length > 0;
+        const hasPoliceComplaints = policeComplaints.length > 0;
+        const hasFiles = filesList.length > 0;
+        const hasLocations = locationsList.length > 0;
+        const hasPersons = personsList.length > 0;
+        const hasComplaints = complaintsList.length > 0;
+
+        if (!hasAppts && !hasPoliceComplaints && !hasFiles && !hasLocations && !hasPersons && !hasComplaints) {
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'empty-state p-4 text-center';
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'empty-icon';
+            iconDiv.style.fontSize = '2rem';
+            iconDiv.textContent = '🔍';
+            const msgP = document.createElement('p');
+            msgP.appendChild(document.createTextNode('لم يتم العثور على أي نتائج مطابقة لـ: "'));
+            const strongQ = document.createElement('strong');
+            strongQ.textContent = query;
+            msgP.appendChild(strongQ);
+            msgP.appendChild(document.createTextNode('"'));
+            emptyDiv.appendChild(iconDiv);
+            emptyDiv.appendChild(msgP);
+            body.replaceChildren(emptyDiv);
             return;
         }
 
-        let html = '<div class="search-results-content" style="display: flex; flex-direction: column; gap: 20px; text-align: right;">';
+        const root = document.createElement('div');
+        root.className = 'search-results-content';
+        root.style.display = 'flex';
+        root.style.flexDirection = 'column';
+        root.style.gap = '20px';
+        root.style.textAlign = 'right';
+
+        // 0. Police Complaints (الشكاوى الأمنية الذكية)
+        if (hasPoliceComplaints) {
+            const section = createSearchSection(`⚖️ الشكاوى الأمنية الذكية (${policeComplaints.length})`, '#0D2E58');
+            const { wrapper, tbody } = createSearchTable([
+                'رقم الشكوى',
+                'الموضوع والأطراف',
+                'أقرب مركز أمني',
+                'قرار الحاكم / الإجراء',
+                'الحالة وعداد 90 يوماً'
+            ]);
+
+            policeComplaints.forEach(pc => {
+                const tr = document.createElement('tr');
+                tr.className = 'pc-search-row';
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', () => {
+                    closeSearchResults();
+                    if (typeof openPoliceComplaintDetail === 'function') {
+                        openPoliceComplaintDetail(Number(pc.id));
+                    }
+                });
+
+                const tdNum = document.createElement('td');
+                const strongNum = document.createElement('strong');
+                strongNum.className = 'text-primary';
+                strongNum.textContent = `⚖️ ${pc.complaint_number || `#${pc.id}`}`;
+                tdNum.appendChild(strongNum);
+                tr.appendChild(tdNum);
+
+                const tdSubject = document.createElement('td');
+                const strongSubj = document.createElement('strong');
+                strongSubj.textContent = pc.subject || 'بدون موضوع';
+                tdSubject.appendChild(strongSubj);
+                if (pc.party_names) {
+                    tdSubject.appendChild(document.createElement('br'));
+                    const partySmall = document.createElement('small');
+                    partySmall.className = 'text-muted';
+                    partySmall.textContent = pc.party_names;
+                    tdSubject.appendChild(partySmall);
+                }
+                tr.appendChild(tdSubject);
+
+                const tdStation = document.createElement('td');
+                tdStation.textContent = pc.nearest_station || 'غير محدد';
+                if (pc.police_directorate) {
+                    tdStation.appendChild(document.createElement('br'));
+                    const dirSmall = document.createElement('small');
+                    dirSmall.className = 'text-muted';
+                    dirSmall.textContent = pc.police_directorate;
+                    tdStation.appendChild(dirSmall);
+                }
+                tr.appendChild(tdStation);
+
+                const tdGov = document.createElement('td');
+                tdGov.textContent = pc.governor_final_action || pc.governor_decision || 'قيد المعالجة';
+                tr.appendChild(tdGov);
+
+                const tdStatus = document.createElement('td');
+                const stageBadge = document.createElement('span');
+                stageBadge.className = 'badge badge-blue';
+                stageBadge.textContent = pc.status || pc.workflow_stage || 'جديد';
+                tdStatus.appendChild(stageBadge);
+                if (pc.ninety_day_status) {
+                    const nd = pc.ninety_day_status;
+                    const daysBadge = document.createElement('span');
+                    daysBadge.className = `badge ${nd.is_due_for_stop ? 'badge-red' : (nd.warning_level === 'warning' ? 'badge-yellow' : 'badge-green')}`;
+                    daysBadge.style.marginRight = '6px';
+                    daysBadge.textContent = `${nd.days_elapsed ?? 0} يوم`;
+                    tdStatus.appendChild(daysBadge);
+                }
+                tr.appendChild(tdStatus);
+
+                tbody.appendChild(tr);
+            });
+
+            section.appendChild(wrapper);
+            root.appendChild(section);
+        }
 
         // 1. Simple Appointments & Visits
         if (hasAppts) {
-            html += `
-                <div class="search-section">
-                    <h4 style="color: var(--primary-color); border-bottom: 2px solid var(--primary-color); padding-bottom: 6px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                        📅 جدول المواعيد والزيارات (${data.simple_appointments.length})
-                    </h4>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>رقم القضية / الصادر</th>
-                                    <th>اسم المراجع</th>
-                                    <th>الهاتف / الهوية</th>
-                                    <th>التاريخ والوقت</th>
-                                    <th>المركز / الملاحظات</th>
-                                    <th>الحالة</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-            data.simple_appointments.forEach(a => {
+            const section = createSearchSection(`📅 جدول المواعيد والزيارات (${simpleAppts.length})`, 'var(--primary-color)');
+            const { wrapper, tbody } = createSearchTable([
+                'رقم القضية / الصادر',
+                'اسم المراجع',
+                'الهاتف / الهوية',
+                'التاريخ والوقت',
+                'المركز / الملاحظات',
+                'الحالة'
+            ]);
+
+            simpleAppts.forEach(a => {
                 const maskClass = getApptMaskClass(a.status, a.appointment_date, a.appointment_time, !!(a.parent_info || a.parent_appointment_id));
-                html += `
-                    <tr class="${maskClass}" style="cursor:pointer;" onclick="closeSearchResults(); openAppointmentDetail(${a.id});">
-                        <td><strong class="text-primary">📄 ${a.case_number}</strong></td>
-                        <td><strong>${a.visitor_name}</strong></td>
-                        <td>${a.phone || a.national_id || '—'}</td>
-                        <td>📅 ${a.appointment_date} <small>(${a.appointment_time || ''})</small></td>
-                        <td>${a.station_name || 'قسم المواعيد'} ${a.notes ? `| <small class="text-muted">${a.notes}</small>` : ''}</td>
-                        <td><span class="badge ${getSimpleBadgeClass ? getSimpleBadgeClass(a.status) : 'badge-scheduled'}">${a.status}</span></td>
-                    </tr>`;
+                const tr = document.createElement('tr');
+                tr.className = `${maskClass} clickable-appt-row`;
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', () => {
+                    closeSearchResults();
+                    openAppointmentDetail(Number(a.id));
+                });
+
+                const tdCase = document.createElement('td');
+                const strongCase = document.createElement('strong');
+                strongCase.className = 'text-primary';
+                strongCase.textContent = `📄 ${a.case_number || ''}`;
+                tdCase.appendChild(strongCase);
+                tr.appendChild(tdCase);
+
+                const tdVisitor = document.createElement('td');
+                const strongVisitor = document.createElement('strong');
+                strongVisitor.textContent = a.visitor_name || '';
+                tdVisitor.appendChild(strongVisitor);
+                tr.appendChild(tdVisitor);
+
+                const tdPhone = document.createElement('td');
+                tdPhone.textContent = a.phone || a.national_id || '—';
+                tr.appendChild(tdPhone);
+
+                const tdDate = document.createElement('td');
+                tdDate.appendChild(document.createTextNode(`📅 ${a.appointment_date || ''} `));
+                const timeSmall = document.createElement('small');
+                timeSmall.textContent = `(${a.appointment_time || ''})`;
+                tdDate.appendChild(timeSmall);
+                tr.appendChild(tdDate);
+
+                const tdNotes = document.createElement('td');
+                tdNotes.appendChild(document.createTextNode(`${a.station_name || 'قسم المواعيد'} `));
+                if (a.notes) {
+                    tdNotes.appendChild(document.createTextNode('| '));
+                    const noteSmall = document.createElement('small');
+                    noteSmall.className = 'text-muted';
+                    noteSmall.textContent = a.notes;
+                    tdNotes.appendChild(noteSmall);
+                }
+                tr.appendChild(tdNotes);
+
+                const tdStatus = document.createElement('td');
+                const badge = document.createElement('span');
+                badge.className = `badge ${typeof getSimpleBadgeClass === 'function' ? getSimpleBadgeClass(a.status) : 'badge-scheduled'}`;
+                badge.textContent = a.status || '';
+                tdStatus.appendChild(badge);
+                tr.appendChild(tdStatus);
+
+                tbody.appendChild(tr);
             });
-            html += `</tbody></table></div></div>`;
+
+            section.appendChild(wrapper);
+            root.appendChild(section);
         }
 
         // 2. Reserved Files (نظام الملفات)
         if (hasFiles) {
-            html += `
-                <div class="search-section">
-                    <h4 style="color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 6px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                        🔒 الملفات المحجوزة والعهدة (${data.files.length})
-                    </h4>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>رقم الملف</th>
-                                    <th>حامل العهدة الحالي</th>
-                                    <th>تاريخ الحجز</th>
-                                    <th>ملاحظات الملف</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-            data.files.forEach(f => {
-                html += `
-                    <tr>
-                        <td><strong class="text-primary" style="font-size: 1.1rem;">📄 ${f.file_number}</strong></td>
-                        <td><strong>👤 ${f.officer_name}</strong></td>
-                        <td><small>${f.reserved_at}</small></td>
-                        <td>${f.notes || '—'}</td>
-                    </tr>`;
+            const section = createSearchSection(`🔒 الملفات المحجوزة والعهدة (${filesList.length})`, '#e67e22');
+            const { wrapper, tbody } = createSearchTable([
+                'رقم الملف',
+                'حامل العهدة الحالي',
+                'تاريخ الحجز',
+                'ملاحظات الملف'
+            ]);
+
+            filesList.forEach(f => {
+                const tr = document.createElement('tr');
+
+                const tdFile = document.createElement('td');
+                const strongFile = document.createElement('strong');
+                strongFile.className = 'text-primary';
+                strongFile.style.fontSize = '1.1rem';
+                strongFile.textContent = `📄 ${f.file_number || ''}`;
+                tdFile.appendChild(strongFile);
+                tr.appendChild(tdFile);
+
+                const tdOfficer = document.createElement('td');
+                const strongOfficer = document.createElement('strong');
+                strongOfficer.textContent = `👤 ${f.officer_name || ''}`;
+                tdOfficer.appendChild(strongOfficer);
+                tr.appendChild(tdOfficer);
+
+                const tdDate = document.createElement('td');
+                const smallDate = document.createElement('small');
+                smallDate.textContent = f.reserved_at || '';
+                tdDate.appendChild(smallDate);
+                tr.appendChild(tdDate);
+
+                const tdNotes = document.createElement('td');
+                tdNotes.textContent = f.notes || '—';
+                tr.appendChild(tdNotes);
+
+                tbody.appendChild(tr);
             });
-            html += `</tbody></table></div></div>`;
+
+            section.appendChild(wrapper);
+            root.appendChild(section);
         }
 
         // 3. Map Locations & Stations (دليل الخريطة والمناطق)
         if (hasLocations) {
-            html += `
-                <div class="search-section">
-                    <h4 style="color: #27ae60; border-bottom: 2px solid #27ae60; padding-bottom: 6px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                        🗺️ المناطق والمراكز الأمنية (${data.locations.length})
-                    </h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">`;
-            data.locations.forEach(loc => {
-                html += `
-                    <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
-                        <div style="font-weight: bold; color: var(--primary-color); font-size: 1.05rem;">📍 ${loc.name}</div>
-                        <div style="font-size: 0.88rem; margin-top: 4px;"><strong>المركز الأمني الأقرب:</strong> ${loc.closest}</div>
-                        <div style="font-size: 0.82rem; color: var(--text-light); margin-top: 2px;">${loc.directorate} (${loc.liwa})</div>
-                    </div>`;
+            const section = createSearchSection(`🗺️ المناطق والمراكز الأمنية (${locationsList.length})`, '#27ae60');
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(280px, 1fr))';
+            grid.style.gap = '12px';
+
+            locationsList.forEach(loc => {
+                const card = document.createElement('div');
+                card.style.background = 'var(--bg-secondary)';
+                card.style.padding = '12px';
+                card.style.borderRadius = '8px';
+                card.style.border = '1px solid var(--border-color)';
+
+                const title = document.createElement('div');
+                title.style.fontWeight = 'bold';
+                title.style.color = 'var(--primary-color)';
+                title.style.fontSize = '1.05rem';
+                title.textContent = `📍 ${loc.name || ''}`;
+                card.appendChild(title);
+
+                const closest = document.createElement('div');
+                closest.style.fontSize = '0.88rem';
+                closest.style.marginTop = '4px';
+                const strongLabel = document.createElement('strong');
+                strongLabel.textContent = 'المركز الأمني الأقرب: ';
+                closest.appendChild(strongLabel);
+                closest.appendChild(document.createTextNode(loc.closest || ''));
+                card.appendChild(closest);
+
+                const dir = document.createElement('div');
+                dir.style.fontSize = '0.82rem';
+                dir.style.color = 'var(--text-light)';
+                dir.style.marginTop = '2px';
+                dir.textContent = `${loc.directorate || ''} (${loc.liwa || ''})`;
+                card.appendChild(dir);
+
+                grid.appendChild(card);
             });
-            html += `</div></div>`;
+
+            section.appendChild(grid);
+            root.appendChild(section);
         }
 
         // 4. Persons & Parties (أطراف المراجعين)
         if (hasPersons) {
-            html += `
-                <div class="search-section">
-                    <h4 style="color: #2980b9; border-bottom: 2px solid #2980b9; padding-bottom: 6px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                        👥 مراجعين وأطراف قضايا مسجلين (${data.persons.length})
-                    </h4>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">`;
-            data.persons.forEach(p => {
-                html += `
-                    <div style="background: var(--bg-secondary); padding: 10px 14px; border-radius: 6px; border-left: 4px solid #2980b9;">
-                        <strong>👤 ${p.name}</strong> - 📞 ${p.phone || 'بدون رقم'} ${p.national_id ? `| 🆔 ${p.national_id}` : ''}
-                        <div style="font-size: 0.85rem; color: var(--text-light); margin-top: 4px;">مرتبط بـ ${p.complaints ? p.complaints.length : 0} قضايا/شكاوى</div>
-                    </div>`;
+            const section = createSearchSection(`👥 مراجعين وأطراف قضايا مسجلين (${personsList.length})`, '#2980b9');
+            const list = document.createElement('div');
+            list.style.display = 'flex';
+            list.style.flexDirection = 'column';
+            list.style.gap = '8px';
+
+            personsList.forEach(p => {
+                const item = document.createElement('div');
+                item.style.background = 'var(--bg-secondary)';
+                item.style.padding = '10px 14px';
+                item.style.borderRadius = '6px';
+                item.style.borderLeft = '4px solid #2980b9';
+
+                const strongName = document.createElement('strong');
+                strongName.textContent = `👤 ${p.name || ''}`;
+                item.appendChild(strongName);
+
+                const idPart = p.national_id ? ` | 🆔 ${p.national_id}` : '';
+                item.appendChild(document.createTextNode(` - 📞 ${p.phone || 'بدون رقم'}${idPart}`));
+
+                const linkedList = p.complaints || p.mat_complaints || [];
+                const sub = document.createElement('div');
+                sub.style.fontSize = '0.85rem';
+                sub.style.color = 'var(--text-light)';
+                sub.style.marginTop = '4px';
+                sub.textContent = `مرتبط بـ ${linkedList.length} قضايا/شكاوى`;
+                item.appendChild(sub);
+
+                list.appendChild(item);
             });
-            html += `</div></div>`;
+
+            section.appendChild(list);
+            root.appendChild(section);
         }
 
         // 5. Complaints (الشكاوى الرئيسية)
         if (hasComplaints) {
-            html += `
-                <div class="search-section">
-                    <h4 style="color: #8e44ad; border-bottom: 2px solid #8e44ad; padding-bottom: 6px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-                        📋 الشكاوى والمحاضر الرئيسية (${data.complaints.length})
-                    </h4>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>رقم الشكوى</th>
-                                    <th>الموضوع</th>
-                                    <th>الضابط المتابع</th>
-                                    <th>الحالة</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-            data.complaints.forEach(c => {
-                html += `
-                    <tr>
-                        <td><strong>${c.complaint_number}</strong></td>
-                        <td>${c.subject}</td>
-                        <td>${c.officer_name || 'غير محدد'}</td>
-                        <td><span class="badge badge-scheduled">${c.status}</span></td>
-                    </tr>`;
+            const section = createSearchSection(`📋 الشكاوى والمحاضر الرئيسية (${complaintsList.length})`, '#8e44ad');
+            const { wrapper, tbody } = createSearchTable([
+                'رقم الشكوى',
+                'الموضوع',
+                'الضابط المتابع',
+                'الحالة'
+            ]);
+
+            complaintsList.forEach(c => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', () => {
+                    closeSearchResults();
+                    if (typeof openPoliceComplaintDetail === 'function') {
+                        openPoliceComplaintDetail(Number(c.id));
+                    }
+                });
+
+                const tdNum = document.createElement('td');
+                const strongNum = document.createElement('strong');
+                strongNum.textContent = c.complaint_number || '';
+                tdNum.appendChild(strongNum);
+                tr.appendChild(tdNum);
+
+                const tdSubj = document.createElement('td');
+                tdSubj.textContent = c.subject || '';
+                tr.appendChild(tdSubj);
+
+                const tdOfficer = document.createElement('td');
+                tdOfficer.textContent = c.officer_name || 'غير محدد';
+                tr.appendChild(tdOfficer);
+
+                const tdStatus = document.createElement('td');
+                const badge = document.createElement('span');
+                badge.className = 'badge badge-scheduled';
+                badge.textContent = c.status || '';
+                tdStatus.appendChild(badge);
+                tr.appendChild(tdStatus);
+
+                tbody.appendChild(tr);
             });
-            html += `</tbody></table></div></div>`;
+
+            section.appendChild(wrapper);
+            root.appendChild(section);
         }
 
-        html += '</div>';
-        body.innerHTML = html;
+        body.replaceChildren(root);
 
     } catch (e) {
         console.error('Error searching:', e);
@@ -1485,32 +1802,79 @@ async function loadOfficersTable() {
         if (!res.ok) return;
         const data = await res.json();
 
-        let html = '';
-        data.officers.forEach(o => {
-            const roleLabels = { 'admin': 'مشرف (صلاحيات كاملة)', 'officer': 'مستخدم / ضابط مواعيد', 'caller': 'ضابط اتصالات' };
+        const roleLabels = {
+            'admin': 'مشرف (صلاحيات كاملة)',
+            'officer': 'مستخدم / ضابط مواعيد',
+            'caller': 'ضابط اتصالات',
+            'governor': 'الحاكم الإداري (المتصرف)'
+        };
+        const toolNamesMap = {
+            'dashboard': 'لوحة التحكم',
+            'complaints': 'نظام المواعيد',
+            'mat_complaints': 'نظام المواعيد',
+            'finder': 'دليل المراكز',
+            'file_reservations': 'أداة حجز الملفات',
+            'police_complaints': 'الشكاوى الذكية',
+            'chat': 'غرفة الاجتماعات'
+        };
+
+        const fragment = document.createDocumentFragment();
+        (data.officers || []).forEach(o => {
             let roleTitle = roleLabels[o.role] || o.role;
             if (o.username === 'orwa') {
                 roleTitle = 'رئيس قسم الشكاوي';
             }
-            html += `
-                <tr>
-                    <td><span class="fw-bold">${o.name}</span></td>
-                    <td><code>${o.username}</code></td>
-                    <td><span class="badge badge-scheduled">${roleTitle}</span></td>
-                    <td><small>${(o.accessible_tools || '').split(',').map(t => {
-                        const toolNamesMap = { 'dashboard': 'لوحة التحكم', 'complaints': 'نظام المواعيد', 'finder': 'دليل المراكز', 'file_reservations': 'أداة حجز الملفات', 'chat': 'غرفة الاجتماعات' };
-                        return toolNamesMap[t.trim()] || t.trim();
-                    }).join('، ')}</small></td>
-                    <td><span class="badge ${o.is_active ? 'badge-completed' : 'badge-cancelled'}">${o.is_active ? 'فعال' : 'معطل'}</span></td>
-                    <td>
-                        <button class="btn btn-ghost btn-sm" onclick="toggleOfficerActive(${o.id}, ${o.is_active ? 0 : 1})">
-                            ${o.is_active ? 'تعطيل' : 'تفعيل'}
-                        </button>
-                    </td>
-                </tr>`;
+
+            const tr = document.createElement('tr');
+
+            const tdName = document.createElement('td');
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'fw-bold';
+            nameSpan.textContent = o.name || '';
+            tdName.appendChild(nameSpan);
+            tr.appendChild(tdName);
+
+            const tdUser = document.createElement('td');
+            const codeEl = document.createElement('code');
+            codeEl.textContent = o.username || '';
+            tdUser.appendChild(codeEl);
+            tr.appendChild(tdUser);
+
+            const tdRole = document.createElement('td');
+            const roleBadge = document.createElement('span');
+            roleBadge.className = 'badge badge-scheduled';
+            roleBadge.textContent = roleTitle || '';
+            tdRole.appendChild(roleBadge);
+            tr.appendChild(tdRole);
+
+            const tdTools = document.createElement('td');
+            const toolsSmall = document.createElement('small');
+            toolsSmall.textContent = parseToolsList(o.accessible_tools)
+                .map(t => toolNamesMap[t] || t)
+                .join('، ');
+            tdTools.appendChild(toolsSmall);
+            tr.appendChild(tdTools);
+
+            const tdActive = document.createElement('td');
+            const activeBadge = document.createElement('span');
+            activeBadge.className = `badge ${o.is_active ? 'badge-completed' : 'badge-cancelled'}`;
+            activeBadge.textContent = o.is_active ? 'فعال' : 'معطل';
+            tdActive.appendChild(activeBadge);
+            tr.appendChild(tdActive);
+
+            const tdActions = document.createElement('td');
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'btn btn-ghost btn-sm';
+            toggleBtn.textContent = o.is_active ? 'تعطيل' : 'تفعيل';
+            toggleBtn.addEventListener('click', () => toggleOfficerActive(o.id, o.is_active ? 0 : 1));
+            tdActions.appendChild(toggleBtn);
+            tr.appendChild(tdActions);
+
+            fragment.appendChild(tr);
         });
 
-        tbody.innerHTML = html;
+        tbody.replaceChildren(fragment);
 
     } catch (e) {
         console.error('Error loading officers table:', e);
@@ -1587,8 +1951,13 @@ function branchAppointment(apptId) {
 function toggleAccessibleTools() {
     const role = document.getElementById('officerRole').value;
     const toolsGroup = document.getElementById('accessibleToolsGroup');
-    if(role === 'admin') {
-        Array.from(toolsGroup.querySelectorAll('input')).forEach(cb => cb.checked = true);
+    if (!toolsGroup) return;
+    const checkboxes = Array.from(toolsGroup.querySelectorAll('input[type="checkbox"]'));
+    if (role === 'admin') {
+        checkboxes.forEach(cb => { cb.checked = true; });
+    } else if (role === 'governor') {
+        const governorDefaults = new Set(['dashboard', 'police_complaints', 'finder', 'chat']);
+        checkboxes.forEach(cb => { cb.checked = governorDefaults.has(cb.value); });
     }
 }
 

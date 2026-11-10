@@ -95,6 +95,7 @@ def _redact_secret(text: str, secret: Optional[str] = None) -> str:
     res = re.sub(r"AIzaSy[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"AQ\.[A-Za-z0-9_.-]{15,}", "[REDACTED]", res)
     res = re.sub(r"sk-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
+    res = re.sub(r"(?:github_pat|ghp)_[A-Za-z0-9_]{15,}", "[REDACTED]", res)
     return res
 
 
@@ -441,46 +442,65 @@ def _call_openai(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], pr
     url = f"{base_url}/chat/completions"
 
     b64_data = base64.b64encode(file_bytes).decode("ascii")
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime_type};base64,{b64_data}"
+    def _send_openai_req(use_response_format: bool) -> str:
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{b64_data}"
+                            },
                         },
-                    },
-                ],
-            }
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.2,
-    }
+                    ],
+                }
+            ],
+            "temperature": 0.2,
+        }
+        if use_response_format:
+            payload["response_format"] = {"type": "json_object"}
 
-    req_data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=req_data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=req_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "MAT-Toolkit/1.46",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read().decode("utf-8")
 
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = resp.read().decode("utf-8")
+    try:
+        body = _send_openai_req(True)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 400:
+            err_detail = _format_http_error(exc, api_key).lower()
+            if "response_format" in err_detail or "json_object" in err_detail or "structured" in err_detail:
+                body = _send_openai_req(False)
+            else:
+                raise urllib.error.HTTPError(exc.url, exc.code, err_detail, exc.headers, None) from None
+        else:
+            raise
 
     resp_json = json.loads(body)
     choices = resp_json.get("choices") or []
     if not choices:
         raise RuntimeError("OpenAI API returned no choices")
 
-    return choices[0].get("message", {}).get("content", "")
+    content = choices[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = "\n".join(
+            str(part.get("text", "")) for part in content if isinstance(part, dict)
+        )
+    return str(content or "")
 
 
 def _call_ollama(file_bytes: bytes, mime_type: str, settings: Dict[str, Any], prompt: str) -> str:
@@ -649,6 +669,17 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 status = getattr(resp, "status", 200)
                 if isinstance(status, int) and not (200 <= status < 300):
                     return {"ok": False, "message": f"Unexpected status {status}", "provider": provider}
+                raw_body = resp.read()
+                try:
+                    parsed_body = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else {}
+                except Exception:
+                    parsed_body = {}
+                if not isinstance(parsed_body, dict) or not parsed_body.get("candidates"):
+                    return {
+                        "ok": False,
+                        "message": "Endpoint did not return valid Gemini candidates JSON",
+                        "provider": provider,
+                    }
                 return {
                     "ok": True,
                     "message": "اتصال مزود Gemini ناجح",
@@ -669,6 +700,7 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "MAT-Toolkit/1.46",
                 },
                 method="POST",
             )
@@ -676,6 +708,17 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 status = getattr(resp, "status", 200)
                 if isinstance(status, int) and not (200 <= status < 300):
                     return {"ok": False, "message": f"Unexpected status {status}", "provider": provider}
+                raw_body = resp.read()
+                try:
+                    parsed_body = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else {}
+                except Exception:
+                    parsed_body = {}
+                if not isinstance(parsed_body, dict) or not parsed_body.get("choices"):
+                    return {
+                        "ok": False,
+                        "message": "Endpoint did not return valid AI completion JSON (check Base URL / model / retired endpoint)",
+                        "provider": provider,
+                    }
                 return {
                     "ok": True,
                     "message": "اتصال مزود OpenAI ناجح",
@@ -694,6 +737,17 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 status = getattr(resp, "status", 200)
                 if isinstance(status, int) and not (200 <= status < 300):
                     return {"ok": False, "message": f"Unexpected status {status}", "provider": provider}
+                raw_body = resp.read()
+                try:
+                    parsed_body = json.loads(raw_body.decode("utf-8", errors="replace")) if raw_body else {}
+                except Exception:
+                    parsed_body = {}
+                if not isinstance(parsed_body, dict) or "models" not in parsed_body:
+                    return {
+                        "ok": False,
+                        "message": "Endpoint did not return valid Ollama /api/tags JSON",
+                        "provider": provider,
+                    }
                 return {
                     "ok": True,
                     "message": "اتصال مزود Ollama ناجح",

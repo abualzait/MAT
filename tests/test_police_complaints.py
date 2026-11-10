@@ -660,6 +660,45 @@ class TestLlmEngine(unittest.TestCase):
         self.assertNotIn("AQ.Ab8RN6JY", res_402["message"])
         self.assertIn("[REDACTED]", res_402["message"])
 
+        # Non-JSON plain "OK\r\n" 200 stub (e.g. retired endpoints) must fail connection test
+        plain_ok_resp = mock.MagicMock()
+        plain_ok_resp.status = 200
+        plain_ok_resp.read.return_value = b"OK\r\n"
+        plain_ok_resp.__enter__.return_value = plain_ok_resp
+        oai_settings = {"provider": "openai", "model_name": "google/gemma-4-31b-it:free", "api_base_url": "https://openrouter.ai/api/v1", "api_key": "github_pat_FakeToken1234567890", "is_enabled": 1}
+        with mock.patch("urllib.request.urlopen", return_value=plain_ok_resp):
+            res_stub = mat_llm_engine.test_llm_connection(oai_settings)
+        self.assertFalse(res_stub["ok"])
+        self.assertIn("valid AI completion JSON", res_stub["message"])
+
+        # _call_openai falls back cleanly without response_format if HTTP 400 rejects response_format
+        rf_err = _uerr.HTTPError(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=_io.BytesIO(b'{"error":{"message":"response_format json_object is not supported for this model"}}'),
+        )
+        ok_oai_resp = mock.MagicMock()
+        ok_oai_resp.read.return_value = json.dumps({
+            "choices": [{"message": {"content": json.dumps({"subject": "شكوى اختبار", "summary": "ملخص", "ai_recommended_action": "اتصال هاتفي"}, ensure_ascii=False)}}]
+        }).encode("utf-8")
+        ok_oai_resp.__enter__.return_value = ok_oai_resp
+        sent_payloads = []
+
+        def fake_urlopen(req, timeout=60):
+            sent_payloads.append(json.loads(req.data.decode("utf-8")))
+            if len(sent_payloads) == 1:
+                raise rf_err
+            return ok_oai_resp
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            res_rf = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", oai_settings)
+        self.assertEqual(res_rf["status"], "ok")
+        self.assertEqual(res_rf["extracted"]["subject"], "شكوى اختبار")
+        self.assertIn("response_format", sent_payloads[0])
+        self.assertNotIn("response_format", sent_payloads[1])
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

@@ -1,6 +1,12 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.1)
+## Current Features (Version 1.46.2)
+
+### التحديث v1.46.2 (التحقق الفعلي من استجابة JSON لفحص الاتصال ودعم نماذج الرؤية الحرة بدون `response_format`)
+1. **تشديد فحص الاتصال (`test_llm_connection`):**
+   - التحقق من أن استجابة المزود تحتوي على بنية JSON فعلية (`candidates` لـ Gemini، `choices` لـ OpenAI، `models` لـ Ollama) لرفض نقاط النهاية المتوقفة التي تعيد نصاً عادياً مثل `"OK"`.
+2. **توافق أوسع مع نماذج OpenRouter / Groq / Mistral المجانية:**
+   - تراجع تلقائي (fallback) في `_call_openai` لإعادة الإرسال بدون `response_format` إذا رفض النموذج المجاني هذا الخيار بـ HTTP 400، مع دعم مصفوفة أجزاء المحتوى وحجب رموز `github_pat_*`/`ghp_*`.
 
 ### التحديث v1.46.1 (تحسين تنسيق حقول الأطراف وتوضيح رسائل أخطاء مزود الذكاء الاصطناعي)
 1. **تحسين تخطيط صفوف الأطراف (`.pc-party-row`) في لوحة المسح:**

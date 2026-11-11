@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.3${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.4${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -809,9 +809,9 @@
             const orientation = await getJpegExifOrientation(file);
             const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
             const maxDim = Math.max(bitmap.width || 0, bitmap.height || 0);
-            const MAX_EDGE = 2400;
+            const MAX_EDGE = 1600;
 
-            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 2500000) {
+            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 750000) {
                 bitmap.close?.();
                 return readFileAsDataUrl(file);
             }
@@ -829,7 +829,7 @@
             }
             ctx.drawImage(bitmap, 0, 0, outW, outH);
             bitmap.close?.();
-            return canvas.toDataURL('image/jpeg', 0.93);
+            return canvas.toDataURL('image/jpeg', 0.90);
         } catch (_err) {
             return readFileAsDataUrl(file);
         }

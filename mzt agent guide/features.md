@@ -1,6 +1,13 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.3)
+## Current Features (Version 1.46.4)
+
+### التحديث v1.46.4 (اعتماد NVIDIA NIM مع نموذج `google/gemma-4-31b-it` وتوافق المفاتيح وضغط صور المسح)
+1. **تكامل NVIDIA NIM (`integrate.api.nvidia.com/v1`) في `mat_llm_engine.py`:**
+   - التعرف التلقائي على نقاط نهاية NVIDIA NIM ومفاتيح `nvapi-*` عبر `_is_nvidia_nim_endpoint` و`_resolve_openai_base_url`، وحجب `nvapi-*` في `_redact_secret`.
+   - تعطيل `response_format` و`image_url.detail` تلقائياً عند الاتصال بـ NVIDIA NIM لمنع تعليق الخادم ورفع مهلة القراءة إلى `95` ثانية مع دعم قراءة `reasoning_content`.
+2. **ضغط وتحسين صور المسح في `police_complaints.js`:**
+   - ضبط `MAX_EDGE = 1600` (بجودة JPEG `0.90` عند تجاوز `1600px` أو `750KB`) لتسريع استخراج `google/gemma-4-31b-it` مع الحفاظ على وضوح الخط العربي.
 
 ### التحديث v1.46.3 (رفع دقة قراءة النصوص العربية للشكاوى، التفريغ الحرفي `raw_transcription`، التدقيق ثنائي المراحل، وتوجيه OpenRouter الذكي)
 1. **رفع دقة محرك الرؤية ومنع التحريف (`mat_llm_engine.py`):**

@@ -780,6 +780,49 @@ class TestLlmEngine(unittest.TestCase):
         self.assertEqual(res["extracted"]["respondents"][0]["phone"], "0788123456")
         self.assertEqual(res["extracted"]["respondents"][0]["name"], "إبراهيم خليل")
 
+    def test_nvidia_nim_payload_auto_url_and_redaction(self):
+        # nvapi-* keys automatically resolve to integrate.api.nvidia.com/v1 when base_url is blank
+        # and omit response_format / image_url.detail so NVIDIA NIM Gemma 4 does not hang
+        fake_nim_json = {
+            "raw_transcription": "شكوى اختبار",
+            "paper_date": "2026/11/10",
+            "complainants": [{"party_category": "مواطن", "name": "سالم", "national_id": "9851042817", "phone": "0795412890", "address": "ضاحية الياسمين"}],
+            "respondents": [],
+            "subject": "موضوع اختباري",
+            "summary": "ملخص واضح",
+            "has_signature": True,
+            "no_pending_lawsuit_declared": True,
+            "ai_recommended_action": "اتصال هاتفي",
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {"model": "google/gemma-4-31b-it", "choices": [{"message": {"content": json.dumps(fake_nim_json, ensure_ascii=False)}}]}
+        ).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        nim_settings = {
+            "provider": "openai",
+            "model_name": "google/gemma-4-31b-it",
+            "api_base_url": "",
+            "api_key": "nvapi-FakeTestKey1234567890ABCD",
+            "is_enabled": 1,
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as m_open:
+            res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", nim_settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["model"], "google/gemma-4-31b-it")
+        req = m_open.call_args[0][0]
+        self.assertEqual(req.full_url, "https://integrate.api.nvidia.com/v1/chat/completions")
+        payload = json.loads(req.data.decode("utf-8"))
+        self.assertNotIn("response_format", payload)
+        self.assertNotIn("detail", payload["messages"][0]["content"][1]["image_url"])
+
+        # Redaction scrubs nvapi-* keys in error messages
+        redacted = mat_llm_engine._redact_secret("Auth failed for nvapi-FakeTestKey1234567890ABCD")
+        self.assertNotIn("FakeTestKey", redacted)
+        self.assertIn("[REDACTED]", redacted)
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

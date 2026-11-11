@@ -114,6 +114,7 @@ def _redact_secret(text: str, secret: Optional[str] = None) -> str:
         res = res.replace(secret, "[REDACTED]")
     res = re.sub(r"AIzaSy[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"AQ\.[A-Za-z0-9_.-]{15,}", "[REDACTED]", res)
+    res = re.sub(r"nvapi-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"sk-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"(?:github_pat|ghp)_[A-Za-z0-9_]{15,}", "[REDACTED]", res)
     return res
@@ -483,6 +484,23 @@ def _is_openrouter_endpoint(base_url: str) -> bool:
     return "openrouter.ai" in (base_url or "").lower()
 
 
+def _is_nvidia_nim_endpoint(base_url: str) -> bool:
+    """Return True when targeting NVIDIA NIM / integrate.api.nvidia.com."""
+    return "integrate.api.nvidia.com" in (base_url or "").lower()
+
+
+def _resolve_openai_base_url(raw_base_url: Any, api_key: str) -> str:
+    """Resolve explicit base URL or infer NVIDIA NIM / OpenRouter from key prefix when blank."""
+    cleaned = str(raw_base_url or "").strip().rstrip("/")
+    if cleaned:
+        return cleaned
+    if api_key.startswith("nvapi-"):
+        return "https://integrate.api.nvidia.com/v1"
+    if api_key.startswith("sk-or-"):
+        return "https://openrouter.ai/api/v1"
+    return "https://api.openai.com/v1"
+
+
 def _resolve_openrouter_vision_models(configured_model: str) -> List[str]:
     """Order reliable OpenRouter free vision candidates without keeping known-weak Arabic models first."""
     model = (configured_model or "").strip()
@@ -502,7 +520,7 @@ def _extract_openai_message_text(choice: Dict[str, Any]) -> str:
     text = str(content or "").strip()
     if text:
         return text
-    reasoning = str(msg.get("reasoning") or "").strip()
+    reasoning = str(msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
     if "{" in reasoning and "}" in reasoning:
         return reasoning
     return ""
@@ -540,9 +558,10 @@ def _call_openai_with_meta(
     if not api_key:
         raise ValueError("OpenAI API key is required")
 
-    base_url = (settings.get("api_base_url") or "https://api.openai.com/v1").rstrip("/")
+    base_url = _resolve_openai_base_url(settings.get("api_base_url"), api_key)
     url = f"{base_url}/chat/completions"
     is_openrouter = _is_openrouter_endpoint(base_url)
+    is_nvidia_nim = _is_nvidia_nim_endpoint(base_url)
     is_free_openrouter = is_openrouter and (
         model.endswith(":free") or model == "openrouter/free"
     )
@@ -583,16 +602,18 @@ def _call_openai_with_meta(
             payload["response_format"] = {"type": "json_object"}
         return payload
 
-    use_rf = True
-    use_detail = True
+    # NVIDIA NIM Gemma 4 stalls when response_format=json_object or image_url.detail=high is sent
+    use_rf = not is_nvidia_nim
+    use_detail = not is_nvidia_nim
     use_or_models = is_free_openrouter
     use_no_reason = is_free_openrouter
+    req_timeout = 95 if is_nvidia_nim else 75
 
     resp_json: Dict[str, Any] = {}
     for _attempt in range(5):
         try:
             payload = _build_payload(use_rf, use_detail, use_or_models, use_no_reason)
-            resp_json = _post_openai_chat(url, api_key, payload, timeout=75)
+            resp_json = _post_openai_chat(url, api_key, payload, timeout=req_timeout)
             break
         except urllib.error.HTTPError as exc:
             if exc.code in (400, 404):
@@ -939,9 +960,10 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                     "model": model,
                 }
         elif provider == "openai":
-            base_url = (settings.get("api_base_url") or "https://api.openai.com/v1").rstrip("/")
+            base_url = _resolve_openai_base_url(settings.get("api_base_url"), api_key)
             url = f"{base_url}/chat/completions"
             is_openrouter = _is_openrouter_endpoint(base_url)
+            is_nvidia_nim = _is_nvidia_nim_endpoint(base_url)
             is_free_or = is_openrouter and (model.endswith(":free") or model == "openrouter/free")
             payload: Dict[str, Any] = {
                 "model": model,
@@ -963,7 +985,7 @@ def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=15 if is_free_or else 10) as resp:
+            with urllib.request.urlopen(req, timeout=15 if (is_free_or or is_nvidia_nim) else 10) as resp:
                 status = getattr(resp, "status", 200)
                 if isinstance(status, int) and not (200 <= status < 300):
                     return {"ok": False, "message": f"Unexpected status {status}", "provider": provider}

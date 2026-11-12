@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.5${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.6${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -835,7 +835,79 @@
         }
     }
 
+    function clearIntakeSourceHighlights() {
+        const form = $('formPoliceComplaintIntake');
+        if (form) {
+            form.querySelectorAll('.pc-field-ocr, .pc-field-ai').forEach((el) => {
+                el.classList.remove('pc-field-ocr', 'pc-field-ai');
+            });
+            form.querySelectorAll('.pc-source-pill[data-dynamic="1"]').forEach((el) => el.remove());
+        }
+        const legend = $('pcSourceLegend');
+        if (legend) legend.style.display = 'none';
+    }
+
+    function markIntakeSourceField(targetEl, kind, pillText) {
+        if (!targetEl) return;
+        const isAi = kind === 'ai';
+        targetEl.classList.remove('pc-field-ocr', 'pc-field-ai');
+        targetEl.classList.add(isAi ? 'pc-field-ai' : 'pc-field-ocr');
+
+        if (pillText && targetEl.id) {
+            const label = document.querySelector(`label[for="${targetEl.id}"]`);
+            if (label && !label.classList.contains('pc-check-item')) {
+                const existing = label.querySelector(`.pc-source-pill[data-for="${targetEl.id}"]`);
+                if (existing) existing.remove();
+                label.appendChild(createEl('span', {
+                    className: `pc-source-pill ${isAi ? 'pc-source-pill-ai' : 'pc-source-pill-ocr'}`,
+                    'data-dynamic': '1',
+                    'data-for': targetEl.id,
+                    style: { marginInlineStart: '0.45rem' },
+                    textContent: pillText
+                }));
+            }
+        }
+
+        if (!targetEl.dataset.pcSourceBound && /^(INPUT|TEXTAREA|SELECT)$/.test(targetEl.tagName)) {
+            targetEl.dataset.pcSourceBound = '1';
+            const clearSelf = () => {
+                targetEl.classList.remove('pc-field-ocr', 'pc-field-ai');
+                if (targetEl.id) {
+                    const pill = document.querySelector(`.pc-source-pill[data-for="${targetEl.id}"]`);
+                    if (pill) pill.remove();
+                }
+            };
+            targetEl.addEventListener('input', clearSelf);
+            targetEl.addEventListener('change', clearSelf);
+        }
+    }
+
+    function renderOcrExtractedBox(scanResponse) {
+        const ocrBox = $('pcOcrExtractedBox');
+        if (!ocrBox) return;
+        ocrBox.replaceChildren();
+
+        const rawTranscript = String((scanResponse && scanResponse.extracted && scanResponse.extracted.raw_transcription) || '').trim();
+        if (!scanResponse || scanResponse.status === 'manual_fallback' || !rawTranscript) {
+            ocrBox.style.display = 'none';
+            return;
+        }
+
+        ocrBox.style.display = 'flex';
+        ocrBox.appendChild(createEl('div', {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }
+        }, [
+            createEl('span', { className: 'pc-source-pill pc-source-pill-ocr', textContent: '📄 النص الحرفي المستخرج من الصورة (OCR)' }),
+            createEl('small', { style: { color: '#0F766E', fontWeight: '700' }, textContent: 'نقل مباشر من الوثيقة دون تفسير' })
+        ]));
+        ocrBox.appendChild(createEl('div', {
+            className: 'pc-ocr-raw-text',
+            textContent: rawTranscript
+        }));
+    }
+
     function renderAiAnalysisBox(scanResponse, isPdfFile) {
+        renderOcrExtractedBox(scanResponse);
         const box = $('pcAiAnalysisBox');
         if (!box) return;
         box.replaceChildren();
@@ -880,22 +952,22 @@
         box.appendChild(createEl('div', {
             style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }
         }, [
-            createEl('span', {
-                className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
-                textContent: isMinor ? '✅ مشكلة خفيفة تتطلب شرطة' : '⚖️ غير مشمولة / قضائية'
-            }),
+            createEl('span', { className: 'pc-source-pill pc-source-pill-ai', textContent: '🤖 ناتج تحليل واستنتاج الذكاء الاصطناعي' }),
             createEl('span', {
                 className: 'badge badge-purple',
                 textContent: `نسبة الثقة: ${confPct}%`
             })
         ]));
 
-        if (provider) {
-            box.appendChild(createEl('div', {
-                style: { fontSize: '0.76rem', color: 'var(--text-secondary)' },
-                textContent: `🤖 محرك التحليل: ${provider}${model ? ` (${model})` : ''}`
-            }));
-        }
+        box.appendChild(createEl('div', {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }
+        }, [
+            createEl('span', {
+                className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
+                textContent: isMinor ? '✅ مشكلة خفيفة تتطلب شرطة' : '⚖️ غير مشمولة / قضائية'
+            }),
+            provider ? createEl('small', { style: { fontSize: '0.75rem', color: 'var(--text-secondary)' }, textContent: `${provider}${model ? ` (${model})` : ''}` }) : null
+        ]));
 
         const fields = [
             { label: 'التكييف الشرطي:', value: analysis.police_necessity_reason },
@@ -912,32 +984,6 @@
             ]));
         });
 
-        const rawTranscript = String((scanResponse && scanResponse.extracted && scanResponse.extracted.raw_transcription) || '').trim();
-        if (rawTranscript) {
-            const detailsEl = createEl('details', {
-                style: { marginTop: '0.35rem', fontSize: '0.8rem' }
-            }, [
-                createEl('summary', {
-                    style: { cursor: 'pointer', fontWeight: '700', color: 'var(--text-secondary)' },
-                    textContent: '📝 النص الخام المفرّغ من الوثيقة (للمطابقة)'
-                }),
-                createEl('div', {
-                    style: {
-                        whiteSpace: 'pre-wrap',
-                        marginTop: '0.35rem',
-                        padding: '0.5rem 0.65rem',
-                        borderRadius: '8px',
-                        background: 'rgba(255, 255, 255, 0.72)',
-                        border: '1px solid var(--border-color)',
-                        lineHeight: '1.6',
-                        color: 'var(--text-primary)'
-                    },
-                    textContent: rawTranscript
-                })
-            ]);
-            box.appendChild(detailsEl);
-        }
-
         const recAction = String(analysis.ai_recommended_action || '').trim();
         if (recAction) {
             const officerSelect = $('pcIntakeOfficerAction');
@@ -951,7 +997,10 @@
                         className: 'btn btn-outline btn-sm',
                         textContent: `✨ اعتماد الإجراء المقترح (${recAction})`,
                         onClick: () => {
-                            if (officerSelect) officerSelect.value = recAction;
+                            if (officerSelect) {
+                                officerSelect.value = recAction;
+                                markIntakeSourceField(officerSelect, 'ai', '🤖 مقترح الذكاء الاصطناعي');
+                            }
                             pcToast(`تم تحديد الإجراء الأولي: ${recAction}`);
                         }
                     })
@@ -961,31 +1010,57 @@
     }
 
     function applyExtractedComplaintToForm(scanResponse) {
+        clearIntakeSourceHighlights();
         const extracted = (scanResponse && scanResponse.extracted) || {};
         const analysis = (scanResponse && scanResponse.analysis) || {};
+        let hasMarked = false;
 
         if (extracted.paper_date) {
             const normDate = normalizeDateForInput(extracted.paper_date);
-            if (normDate && $('pcPaperDate')) $('pcPaperDate').value = normDate;
+            if (normDate && $('pcPaperDate')) {
+                $('pcPaperDate').value = normDate;
+                markIntakeSourceField($('pcPaperDate'), 'ocr', '📄 من الصورة');
+                hasMarked = true;
+            }
         }
         if (extracted.subject && $('pcSubject')) {
             $('pcSubject').value = extracted.subject;
+            markIntakeSourceField($('pcSubject'), 'ocr', '📄 من الصورة');
+            hasMarked = true;
         }
         if (extracted.summary && $('pcSummary')) {
             $('pcSummary').value = extracted.summary;
+            markIntakeSourceField($('pcSummary'), 'ocr', '📄 من الصورة');
+            hasMarked = true;
         }
         if ($('pcHasSignature') && typeof extracted.has_signature === 'boolean') {
             $('pcHasSignature').checked = extracted.has_signature;
+            if (extracted.has_signature) {
+                markIntakeSourceField($('pcHasSignature').closest('.pc-check-item'), 'ocr', '');
+                hasMarked = true;
+            }
         }
         if ($('pcNoPendingLawsuit') && typeof extracted.no_pending_lawsuit_declared === 'boolean') {
             $('pcNoPendingLawsuit').checked = extracted.no_pending_lawsuit_declared;
+            if (extracted.no_pending_lawsuit_declared) {
+                markIntakeSourceField($('pcNoPendingLawsuit').closest('.pc-check-item'), 'ocr', '');
+                hasMarked = true;
+            }
         }
 
         if (Array.isArray(extracted.complainants) && extracted.complainants.length > 0) {
             populatePartyRows('pcComplainantsList', 'شاكي', extracted.complainants);
+            $('pcComplainantsList')?.querySelectorAll('.pc-party-row').forEach((row) => {
+                markIntakeSourceField(row, 'ocr', '');
+            });
+            hasMarked = true;
         }
         if (Array.isArray(extracted.respondents) && extracted.respondents.length > 0) {
             populatePartyRows('pcRespondentsList', 'مشتكى_عليه', extracted.respondents);
+            $('pcRespondentsList')?.querySelectorAll('.pc-party-row').forEach((row) => {
+                markIntakeSourceField(row, 'ocr', '');
+            });
+            hasMarked = true;
         }
 
         if (scanResponse.station_match && scanResponse.station_match.matched) {
@@ -998,7 +1073,14 @@
         const officerSelect = $('pcIntakeOfficerAction');
         if (officerSelect && !officerSelect.value && analysis.ai_recommended_action) {
             setSelectValueIfOptionExists(officerSelect, analysis.ai_recommended_action);
+            if (officerSelect.value) {
+                markIntakeSourceField(officerSelect, 'ai', '🤖 مقترح الذكاء الاصطناعي');
+                hasMarked = true;
+            }
         }
+
+        const legend = $('pcSourceLegend');
+        if (legend && hasMarked) legend.style.display = 'flex';
     }
 
     async function rotatePendingScanFile(degrees = 90) {
@@ -1104,7 +1186,12 @@
         const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
             || String(file.name || '').toLowerCase().endsWith('.pdf');
 
-        // Show loading spinner cleanly inside AI analysis card & status badge
+        // Show loading spinner cleanly inside AI analysis card & reset OCR box
+        const ocrBox = $('pcOcrExtractedBox');
+        if (ocrBox) {
+            ocrBox.style.display = 'none';
+            ocrBox.replaceChildren();
+        }
         setExtractionStatus('جاري قراءة الخط اليدوي وتحليل الشكوى بالذكاء الاصطناعي...', 'badge-purple');
         const aiBox = $('pcAiAnalysisBox');
         if (aiBox) {
@@ -1220,6 +1307,12 @@
         populatePartyRows('pcRespondentsList', 'مشتكى_عليه', [{}]);
         renderIntakePreview();
 
+        clearIntakeSourceHighlights();
+        const ocrBox = $('pcOcrExtractedBox');
+        if (ocrBox) {
+            ocrBox.style.display = 'none';
+            ocrBox.replaceChildren();
+        }
         const aiBox = $('pcAiAnalysisBox');
         if (aiBox) {
             aiBox.style.display = 'none';
@@ -1902,26 +1995,34 @@
         metaCard.appendChild(infoGrid);
         frag.appendChild(metaCard);
 
-        // Card 2: Subject, Summary & AI Analysis
+        // Card 2: Extracted / Entered Complaint Text vs AI Analysis (clearly separated)
         const contentCard = createEl('div', { className: 'pc-summary-card' }, [
-            createEl('h4', { style: { marginBottom: '0.4rem', color: 'var(--accent-primary)' }, textContent: `موضوع الشكوى: ${detail.subject || '—'}` }),
-            createEl('p', {
-                style: { margin: '0 0 0.75rem', whiteSpace: 'pre-wrap', lineHeight: '1.65', fontSize: '0.92rem' },
-                textContent: detail.summary || 'لا يوجد ملخص تفصيلي مسجل.'
-            })
+            createEl('div', { className: 'pc-ocr-box', style: { marginTop: '0', marginBottom: '0.65rem' } }, [
+                createEl('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' } }, [
+                    createEl('span', { className: 'pc-source-pill pc-source-pill-ocr', textContent: '📄 النص والبيانات المستخرجة من الشكوى' })
+                ]),
+                createEl('h4', { style: { margin: '0.2rem 0 0.25rem', color: '#0F766E' }, textContent: `موضوع الشكوى: ${detail.subject || '—'}` }),
+                createEl('p', {
+                    style: { margin: '0', whiteSpace: 'pre-wrap', lineHeight: '1.65', fontSize: '0.92rem' },
+                    textContent: detail.summary || 'لا يوجد ملخص تفصيلي مسجل.'
+                })
+            ])
         ]);
 
         if (detail.ai_analysis || detail.ai_solution_recommendation || detail.ai_recommended_action) {
             const isMinor = detail.is_minor_police_complaint !== 0 && detail.is_minor_police_complaint !== false;
             const aiPanel = createEl('div', { className: 'pc-ai-box', style: { marginTop: '0.5rem' } }, [
                 createEl('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' } }, [
-                    createEl('span', {
-                        className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
-                        textContent: isMinor ? '🤖 تصنيف الذكاء الاصطناعي: مشكلة خفيفة تتطلب شرطة' : '⚖️ تصنيف الذكاء الاصطناعي: غير مشمولة / قضائية'
-                    }),
+                    createEl('span', { className: 'pc-source-pill pc-source-pill-ai', textContent: '🤖 ناتج تحليل واستنتاج الذكاء الاصطناعي' }),
                     detail.ai_provider
                         ? createEl('small', { className: 'text-muted', textContent: `${detail.ai_provider}${detail.ai_model ? ` / ${detail.ai_model}` : ''}` })
                         : null
+                ]),
+                createEl('div', { style: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' } }, [
+                    createEl('span', {
+                        className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
+                        textContent: isMinor ? '✅ تصنيف: مشكلة خفيفة تتطلب شرطة' : '⚖️ تصنيف: غير مشمولة / قضائية'
+                    })
                 ]),
                 detail.ai_analysis
                     ? createEl('div', { style: { fontSize: '0.84rem' } }, [

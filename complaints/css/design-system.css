@@ -2836,15 +2836,91 @@ input:checked + .slider:before {
   padding: 1.5rem 0.75rem;
 }
 .pc-ai-box {
-  margin-top: 1rem;
+  margin-top: 0.85rem;
   border-radius: var(--radius-lg);
   border: 1.5px solid #C4B5FD;
-  background: linear-gradient(135deg, #FAF5FF 0%, #EFF6FF 100%);
+  border-inline-start: 4px solid #7C3AED;
+  background: linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%);
   padding: 1rem;
   box-shadow: 0 4px 12px rgba(109, 40, 217, 0.08);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+.pc-ocr-box {
+  margin-top: 0.85rem;
+  border-radius: var(--radius-lg);
+  border: 1.5px solid #5EEAD4;
+  border-inline-start: 4px solid #0D9488;
+  background: linear-gradient(135deg, #F0FDFA 0%, #ECFEFF 100%);
+  padding: 1rem;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pc-ocr-raw-text {
+  white-space: pre-wrap;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #99F6E4;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.pc-source-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+  border-radius: var(--radius-md);
+  background: #F8FAFC;
+  border: 1px dashed #CBD5E1;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.pc-source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.71rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.pc-source-pill-ocr {
+  background: #CCFBF1;
+  color: #0F766E;
+  border: 1px solid #99F6E4;
+}
+.pc-source-pill-ai {
+  background: #EDE9FE;
+  color: #6D28D9;
+  border: 1px solid #DDD6FE;
+}
+.form-control.pc-field-ocr,
+.pc-check-item.pc-field-ocr,
+.pc-party-row.pc-field-ocr {
+  border-color: #14B8A6 !important;
+  border-inline-start: 3.5px solid #0D9488 !important;
+  background-color: #F0FDFA !important;
+}
+.pc-check-item.pc-field-ocr {
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #14B8A6;
+}
+.form-control.pc-field-ai,
+.pc-officer-intake-box.pc-field-ai {
+  border-color: #8B5CF6 !important;
+  border-inline-start: 3.5px solid #7C3AED !important;
+  background-color: #FAF5FF !important;
 }
 
 /* Multi-Party Dynamic Rows */

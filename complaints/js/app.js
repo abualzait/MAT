@@ -427,7 +427,7 @@ function switchTab(tabId) {
     if (tabId === 'stations') {
         const iframe = document.getElementById('stationsIframe');
         if (iframe && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes('Police_Station_Finder'))) {
-            iframe.src = '../Police_Station_Finder.html?v=1.46.5';
+            iframe.src = '../Police_Station_Finder.html?v=1.46.6';
         }
     } else if (tabId === 'appointments') {
         loadSimpleAppointments();

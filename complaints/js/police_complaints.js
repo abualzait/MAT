@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.7${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.8${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -809,9 +809,9 @@
             const orientation = await getJpegExifOrientation(file);
             const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
             const maxDim = Math.max(bitmap.width || 0, bitmap.height || 0);
-            const MAX_EDGE = 1600;
+            const MAX_EDGE = 1440;
 
-            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 750000) {
+            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 500000) {
                 bitmap.close?.();
                 return readFileAsDataUrl(file);
             }
@@ -829,7 +829,7 @@
             }
             ctx.drawImage(bitmap, 0, 0, outW, outH);
             bitmap.close?.();
-            return canvas.toDataURL('image/jpeg', 0.90);
+            return canvas.toDataURL('image/jpeg', 0.88);
         } catch (_err) {
             return readFileAsDataUrl(file);
         }
@@ -1165,6 +1165,90 @@
         }
     }
 
+    let scanAnimationTimer = null;
+
+    function stopScanLoadingAnimation() {
+        if (scanAnimationTimer) {
+            clearInterval(scanAnimationTimer);
+            scanAnimationTimer = null;
+        }
+        const previewArea = $('pcScanPreviewArea');
+        if (previewArea) previewArea.classList.remove('pc-is-scanning');
+        const analyzeBtn = $('pcScanAnalyzeBtn');
+        if (analyzeBtn) {
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '🤖 قراءة وتحليل بالذكاء الاصطناعي';
+        }
+    }
+
+    function startScanLoadingAnimation() {
+        stopScanLoadingAnimation();
+        const previewArea = $('pcScanPreviewArea');
+        if (previewArea) previewArea.classList.add('pc-is-scanning');
+
+        const analyzeBtn = $('pcScanAnalyzeBtn');
+        if (analyzeBtn) {
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '⏳ جاري القراءة والتحليل...';
+        }
+
+        const aiBox = $('pcAiAnalysisBox');
+        if (!aiBox) return;
+
+        const timerEl = createEl('span', { className: 'pc-scan-timer', textContent: '⏱️ 00:00' });
+        const stepDefs = [
+            { icon: '📤', text: 'تهيئة الصورة وضبط الدقة للرفع...' },
+            { icon: '📄', text: 'استخراج النصوص والأرقام من الوثيقة (OCR)...' },
+            { icon: '🤖', text: 'التحليل القانوني ومطابقة المركز الأمني الأقرب...' }
+        ];
+        const stepEls = stepDefs.map((s) => createEl('div', { className: 'pc-scan-step' }, [
+            createEl('span', { className: 'pc-step-icon', textContent: s.icon }),
+            createEl('span', { textContent: s.text })
+        ]));
+
+        const card = createEl('div', { className: 'pc-ai-loading-card' }, [
+            createEl('div', { className: 'pc-ai-loading-head' }, [
+                createEl('div', { className: 'pc-ai-loading-title-wrap' }, [
+                    createEl('span', { className: 'pc-radar-dot' }),
+                    createEl('span', { textContent: 'جاري مسح الوثيقة وتحليلها بالذكاء الاصطناعي...' })
+                ]),
+                timerEl
+            ]),
+            createEl('div', { className: 'pc-progress-track' }, [
+                createEl('div', { className: 'pc-progress-bar-anim' })
+            ]),
+            createEl('div', { className: 'pc-scan-steps' }, stepEls)
+        ]);
+
+        aiBox.style.display = 'flex';
+        aiBox.replaceChildren(card);
+
+        const startedAt = Date.now();
+        const updateProgress = () => {
+            const elapsedSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+            const mins = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+            const secs = String(elapsedSec % 60).padStart(2, '0');
+            timerEl.textContent = `⏱️ ${mins}:${secs}`;
+
+            const activeIdx = elapsedSec < 2 ? 0 : (elapsedSec < 9 ? 1 : 2);
+            stepEls.forEach((el, idx) => {
+                el.classList.remove('is-active', 'is-done');
+                const iconEl = el.querySelector('.pc-step-icon');
+                if (idx < activeIdx) {
+                    el.classList.add('is-done');
+                    if (iconEl) iconEl.textContent = '✅';
+                } else if (idx === activeIdx) {
+                    el.classList.add('is-active');
+                    if (iconEl) iconEl.textContent = stepDefs[idx].icon;
+                } else {
+                    if (iconEl) iconEl.textContent = stepDefs[idx].icon;
+                }
+            });
+        };
+        updateProgress();
+        scanAnimationTimer = setInterval(updateProgress, 1000);
+    }
+
     async function runScanExtraction() {
         if (state.isScanning) return;
         const file = state.pendingScanFile;
@@ -1180,13 +1264,11 @@
         }
 
         state.isScanning = true;
-        const analyzeBtn = $('pcScanAnalyzeBtn');
-        if (analyzeBtn) analyzeBtn.disabled = true;
 
         const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
             || String(file.name || '').toLowerCase().endsWith('.pdf');
 
-        // Show loading spinner cleanly inside AI analysis card & reset OCR box
+        // Show live laser sweep over preview + animated step tracker + elapsed timer
         const ocrBox = $('pcOcrExtractedBox');
         if (ocrBox) {
             ocrBox.style.display = 'none';
@@ -1194,15 +1276,7 @@
         }
         setExtractionStatus('جاري قراءة الخط اليدوي وتحليل الشكوى بالذكاء الاصطناعي...', 'badge-purple');
         const aiBox = $('pcAiAnalysisBox');
-        if (aiBox) {
-            aiBox.style.display = 'flex';
-            aiBox.replaceChildren(createEl('div', {
-                style: { display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: '700', color: 'var(--accent-primary)' }
-            }, [
-                createEl('span', { className: 'spinner spinner-dark' }),
-                createEl('span', { textContent: 'جاري قراءة الخط اليدوي وتحليل الشكوى بالذكاء الاصطناعي...' })
-            ]));
-        }
+        startScanLoadingAnimation();
 
         try {
             const dataUrl = await prepareScanUploadDataUrl(file);
@@ -1286,7 +1360,7 @@
             pcToast((errObj && errObj.message) || 'حدث خطأ أثناء معالجة الملف', true);
         } finally {
             state.isScanning = false;
-            if (analyzeBtn) analyzeBtn.disabled = false;
+            stopScanLoadingAnimation();
         }
     }
 

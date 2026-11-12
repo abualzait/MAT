@@ -1,6 +1,12 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.7)
+## Current Features (Version 1.46.8)
+
+### التحديث v1.46.8 (رسوم المسح الضوئي المتحركة ومؤقت التحليل وتسريع معالجة الذكاء الاصطناعي)
+1. **رسوم متحركة متكاملة أثناء التحليل (`design-system.css?v=28` و`police_complaints.js`):**
+   - شعاع مسح ليزري متحرك (`pcScanSweep` عبر `.pc-is-scanning`) فوق معاينة الوثيقة طوال فترة التحليل، ونبض راداري وشريط تقدم متدرج مع عداد وقت مباشر (`⏱️ MM:SS`) ومؤشر مراحل حي من 3 خطوات داخل `#pcAiAnalysisBox` عبر `startScanLoadingAnimation` / `stopScanLoadingAnimation`.
+2. **تسريع زمن التحليل (`mat_llm_engine.py` و`police_complaints.js`):**
+   - استبدال نموذج التدقيق الثقيل (550B) بنموذج `nvidia/nemotron-3.5-lightning:free` الأسرع بأكثر من 10 أضعاف للتصحيح اللغوي عند الحاجة، وحصر كشف الأخطاء بالحقول الفعلية للشكوى دون إعادة فحص `raw_transcription`، وتقليص إيجاز التحليل لخفض زمن الاستجابة وضغط الصور الكبيرة حتى `1440px` (`quality 0.88`).
 
 ### التحديث v1.46.7 (معالجة انتهاء الجلسة 401 تلقائياً وتوجيه المستخدم لتسجيل الدخول)
 1. **كشف انتهاء الجلسة في `app.js` و`police_complaints.js`:**

@@ -27,8 +27,8 @@ OPENROUTER_FREE_VISION_FALLBACKS = [
 ]
 
 OPENROUTER_FREE_TEXT_CLEANUP_MODELS = [
+    "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "xingchen-agi/xing4.0-29b-a4b:free",
 ]
 
 DEFAULT_MODELS = {
@@ -77,9 +77,9 @@ COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني ومحرر وثا�
   "has_signature": true,
   "no_pending_lawsuit_declared": true,
   "is_minor_police_complaint": true,
-  "police_necessity_reason": "سبب توجيه الشكوى للمركز الأمني أو سبب حفظها بالعربية",
-  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني لها بالعربية",
-  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح لإنهاء النزاع وإصلاح ذات البين بالعربية",
+  "police_necessity_reason": "سبب توجيه الشكوى للمركز الأمني أو حفظها باختصار بالعربية (جملة إلى جملتين)",
+  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني باختصار ووضوح بالعربية (جملتان إلى ثلاث جمل)",
+  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح باختصار ووضوح بالعربية (جملتان إلى ثلاث جمل)",
   "ai_recommended_action": "توديع عن طريق مركز أمني",
   "ai_confidence": 0.92
 }
@@ -720,7 +720,6 @@ def _has_foreign_script_noise(parsed: Dict[str, Any]) -> bool:
         return False
     texts: List[str] = []
     for key in (
-        "raw_transcription",
         "subject",
         "summary",
         "police_necessity_reason",

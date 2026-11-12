@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.6${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.7${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -1228,9 +1228,18 @@
             const data = await readJsonSafe(res);
 
             if (!res.ok) {
-                setExtractionStatus('تعذر رفع أو تحليل الوثيقة', 'badge-red');
+                const isExpired = res.status === 401;
+                setExtractionStatus(
+                    isExpired ? 'انتهت الجلسة — يرجى تسجيل الدخول مجدداً' : 'تعذر رفع أو تحليل الوثيقة',
+                    'badge-red'
+                );
                 if (aiBox) aiBox.style.display = 'none';
-                pcToast(data.error || 'فشل تحليل الوثيقة الممسوحة', true);
+                pcToast(
+                    isExpired
+                        ? 'انتهت الجلسة أو تم تحديث الخادم — أعد تسجيل الدخول ثم أعد المحاولة'
+                        : (data.error || 'فشل تحليل الوثيقة الممسوحة'),
+                    true
+                );
                 return;
             }
 

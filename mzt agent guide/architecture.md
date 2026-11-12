@@ -1,6 +1,6 @@
 # MAT Architecture & Directory Structure
 
-This document outlines the folder structure, core modules, environment configuration, and deployment instructions for the MAT project (`v1.46.6`).
+This document outlines the folder structure, core modules, environment configuration, and deployment instructions for the MAT project (`v1.46.7`).
 
 ## Directory Map
 
@@ -19,20 +19,20 @@ Amman Police Stations/
 ├── mat_complaints.db              # Active runtime SQLite database (gitignored)
 ├── data_backup.json               # Continuous JSON state snapshot for container restart recovery (gitignored)
 ├── key.json                       # Google Service Account JSON key for FCM push notifications (gitignored)
-├── index.html                     # Portal landing & redirect page (v1.46.6)
+├── index.html                     # Portal landing & redirect page (v1.46.7)
 ├── Police_Station_Finder.html     # GIS Interactive Map tool (Offline/Online Leaflet, 9 Liwas, 8,750+ POIs)
 ├── firebase-messaging-sw.js       # Service worker for FCM push notifications
 ├── amman_logo.png                 # Official governorate emblem
 ├── leaflet.css / leaflet.js       # Bundled Leaflet assets for offline use
 ├── mzt agent guide/               # Mandatory Agent Guidance Docs (rules, dictionary, features, schema, architecture, api)
 ├── complaints/
-│   ├── app.html                   # Main dashboard shell, Smart Police Complaints tab, Governor & LLM modals (v1.46.6)
+│   ├── app.html                   # Main dashboard shell, Smart Police Complaints tab, Governor & LLM modals (v1.46.7)
 │   ├── login.html                 # User avatar quick-login & secret code portal (including governor avatar)
 │   ├── css/
 │   │   └── design-system.css      # Civic Horizon glassmorphic styling, Police Complaints layout, & print CSS (?v=27)
 │   └── js/
-│       ├── app.js                 # Core navigation, RBAC sidebar builder, appointments, reservations, chat (?v=1.46.6)
-│       ├── police_complaints.js   # XSS-safe Smart Police Complaints UI, OCR intake, workflow panels (?v=1.46.6)
+│       ├── app.js                 # Core navigation, RBAC sidebar builder, appointments, reservations, chat (?v=1.46.7)
+│       ├── police_complaints.js   # XSS-safe Smart Police Complaints UI, OCR intake, workflow panels (?v=1.46.7)
 │       └── map.js                 # Dashboard map helper integration
 ├── data/
 │   ├── amman_areas.json           # 597+ Amman areas mapped to nearest police stations, directorates, & Liwas
@@ -46,7 +46,7 @@ Amman Police Stations/
 
 ## Core Stack Overview
 1. **Backend:** Python 3 standard library only (`http.server`, `socketserver`, `sqlite3`, `json`, `hashlib`, `urllib.request`, `zipfile`, `xml.etree.ElementTree`, `email.parser`, `tempfile`) — zero external `pip` dependencies.
-2. **Frontend:** Vanilla HTML5, CSS3 (`design-system.css?v=27`), Vanilla ES6 JavaScript (`police_complaints.js?v=1.46.6`, `app.js?v=1.46.6`).
+2. **Frontend:** Vanilla HTML5, CSS3 (`design-system.css?v=27`), Vanilla ES6 JavaScript (`police_complaints.js?v=1.46.7`, `app.js?v=1.46.7`).
 3. **Storage & Media:** SQLite 3 in WAL mode (`mat_complaints.db` / `MAT_DB_PATH`) + atomic UUID scan file storage (`MAT_SCANS_DIR`, default `data/complaint_scans/`) + official `.docx` template (`complaint_form_editable.docx`).
 4. **AI Vision & Notifications:** Multi-provider REST Vision LLM client (`mat_llm_engine.py`) + Firebase Cloud Messaging v1 (`server.py`).
 

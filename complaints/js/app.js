@@ -58,7 +58,24 @@ window.fetch = async function(resource, config = {}) {
     if (BACKEND_HOST) {
         config.credentials = 'include';
     }
-    return originalFetch(resource, config);
+    const res = await originalFetch(resource, config);
+    if (
+        res.status === 401
+        && targetUrl.includes('/api/')
+        && !targetUrl.includes('/api/v1/mat/login')
+        && !targetUrl.includes('/api/v1/mat/me')
+        && typeof window !== 'undefined'
+        && !window.__matAuthRedirecting
+    ) {
+        window.__matAuthRedirecting = true;
+        if (typeof showToast === 'function') {
+            showToast('انتهت صلاحية الجلسة أو تم تحديث الخادم — جارٍ التوجيه لتسجيل الدخول...', 'error');
+        }
+        setTimeout(() => {
+            window.location.href = './login.html';
+        }, 1200);
+    }
+    return res;
 };
 
 // ── Initialization ──────────────────────────────────────────
@@ -427,7 +444,7 @@ function switchTab(tabId) {
     if (tabId === 'stations') {
         const iframe = document.getElementById('stationsIframe');
         if (iframe && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes('Police_Station_Finder'))) {
-            iframe.src = '../Police_Station_Finder.html?v=1.46.6';
+            iframe.src = '../Police_Station_Finder.html?v=1.46.7';
         }
     } else if (tabId === 'appointments') {
         loadSimpleAppointments();

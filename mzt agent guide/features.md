@@ -1,6 +1,11 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.9)
+## Current Features (Version 1.46.10)
+
+### التحديث v1.46.10 (اعتماد Groq `qwen/qwen3.8-27b` السريع مع احتياطي OpenRouter التلقائي وحماية `1000 OTPM`)
+1. **تكامل Groq LPU فائق السرعة (`mat_llm_engine.py`):**
+   - التعرف على نقاط نهاية Groq (`_is_groq_endpoint` / مفاتيح `gsk_*`)، حجب `gsk_*` داخل `_redact_secret`، وتقييد `max_tokens=900` لحماية سقف الـ 1000 توكن/دقيقة المجاني على Groq مع دعم `response_format=json_object` و`detail=high` دون اختلاق عند ضعف الصورة (`ai_confidence < 0.35`).
+   - تثبيت `qwen/qwen3.8-27b` عبر `https://api.groq.com/openai/v1` كمزود أساسي (~1.8 ثانية للاستجابة) مع إبقاء OpenRouter كاحتياطي تلقائي عبر `MAT_FALLBACK_*`.
 
 ### التحديث v1.46.9 (منع حقن القيم المختلقة أو المشوّشة في حقول الشكوى ومنع التحليل التلقائي للصور الجانبية)
 1. **حماية ضد الهلوسة والبيانات المختلقة (`mat_llm_engine.py`):**

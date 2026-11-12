@@ -955,6 +955,38 @@ class TestLlmEngine(unittest.TestCase):
         reason = mat_llm_engine._detect_unreliable_extraction(ext_splice, ana_splice)
         self.assertIn("تعذرت قراءة الخط اليدوي", reason)
 
+        # 3) Groq gsk_ caps max_tokens=900 for 1000 OTPM budget, redacts gsk_, and rejects low-confidence blurry scans
+        self.assertNotIn("SecretValue", mat_llm_engine._redact_secret("Error gsk_SecretValue1234567890ABCD"))
+        blurry_json = {
+            "raw_transcription": "[غير واضح]",
+            "complainants": [],
+            "respondents": [],
+            "subject": "شكوى غير مقروءة",
+            "summary": "تعذر القراءة",
+            "ai_confidence": 0.1,
+        }
+        mock_groq = mock.MagicMock()
+        mock_groq.read.return_value = json.dumps(
+            {"model": "qwen/qwen3.8-27b", "choices": [{"message": {"content": json.dumps(blurry_json, ensure_ascii=False)}}]}
+        ).encode("utf-8")
+        mock_groq.__enter__.return_value = mock_groq
+        groq_settings = {
+            "provider": "openai",
+            "model_name": "qwen/qwen3.8-27b",
+            "api_base_url": "",
+            "api_key": "gsk_FakeGroqKey1234567890ABCD",
+            "is_enabled": 1,
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_groq) as m_groq:
+            res_blurry = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", groq_settings)
+
+        req_groq = m_groq.call_args[0][0]
+        self.assertEqual(req_groq.full_url, "https://api.groq.com/openai/v1/chat/completions")
+        sent_groq = json.loads(req_groq.data.decode("utf-8"))
+        self.assertEqual(sent_groq["max_tokens"], 900)
+        self.assertEqual(res_blurry["status"], "manual_fallback")
+        self.assertIn("تعذر استخراج نص واضح", res_blurry["message"])
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

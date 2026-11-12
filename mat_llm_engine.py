@@ -115,6 +115,7 @@ def _redact_secret(text: str, secret: Optional[str] = None) -> str:
     res = re.sub(r"AIzaSy[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"AQ\.[A-Za-z0-9_.-]{15,}", "[REDACTED]", res)
     res = re.sub(r"nvapi-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
+    res = re.sub(r"gsk_[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"sk-[A-Za-z0-9_-]{15,}", "[REDACTED]", res)
     res = re.sub(r"(?:github_pat|ghp)_[A-Za-z0-9_]{15,}", "[REDACTED]", res)
     return res
@@ -497,6 +498,11 @@ def _is_nvidia_nim_endpoint(base_url: str) -> bool:
     return "integrate.api.nvidia.com" in (base_url or "").lower()
 
 
+def _is_groq_endpoint(base_url: str) -> bool:
+    """Return True when targeting Groq OpenAI-compatible API gateway."""
+    return "api.groq.com" in (base_url or "").lower()
+
+
 def _resolve_openai_base_url(raw_base_url: Any, api_key: str) -> str:
     """Resolve explicit base URL or infer NVIDIA NIM, Groq, or OpenRouter from key prefix when blank."""
     cleaned = str(raw_base_url or "").strip().rstrip("/")
@@ -572,6 +578,7 @@ def _call_openai_with_meta(
     url = f"{base_url}/chat/completions"
     is_openrouter = _is_openrouter_endpoint(base_url)
     is_nvidia_nim = _is_nvidia_nim_endpoint(base_url)
+    is_groq = _is_groq_endpoint(base_url)
     is_free_openrouter = is_openrouter and (
         model.endswith(":free") or model == "openrouter/free"
     )
@@ -601,7 +608,7 @@ def _call_openai_with_meta(
                 }
             ],
             "temperature": 0.1 if is_free_openrouter else 0.0,
-            "max_tokens": 4096,
+            "max_tokens": 900 if is_groq else 4096,
         }
         if use_openrouter_routing:
             candidates = _resolve_openrouter_vision_models(model)
@@ -621,7 +628,7 @@ def _call_openai_with_meta(
     use_or_models = is_free_openrouter
     use_no_reason = is_free_openrouter
     use_freq_penalty = is_free_openrouter
-    req_timeout = 95 if is_nvidia_nim else 75
+    req_timeout = 95 if is_nvidia_nim else (45 if is_groq else 75)
 
     resp_json: Dict[str, Any] = {}
     for _attempt in range(6):
@@ -833,8 +840,8 @@ def _get_fallback_openai_settings(primary_settings: Dict[str, Any]) -> Optional[
             fb_model = OPENROUTER_FREE_VISION_FALLBACKS[0]
         elif _is_nvidia_nim_endpoint(resolved_base):
             fb_model = "google/gemma-4-31b-it"
-        elif "api.groq.com" in resolved_base.lower():
-            fb_model = "meta-llama/llama-4-scout-17b-16e-instruct"
+        elif _is_groq_endpoint(resolved_base):
+            fb_model = "qwen/qwen3.8-27b"
         else:
             fb_model = _default_model_for_provider("openai")
     if fb_key == primary_key and fb_model == str(primary_settings.get("model_name") or "").strip():
@@ -883,12 +890,14 @@ def _detect_unreliable_extraction(
     combined = "\n".join(text_fields)
     if _CJK_OR_CYRILLIC_RE.search(combined) or len(_ARABIC_LATIN_SPLICE_RE.findall(combined)) >= 1:
         return (
-            "تعذرت قراءة الخط اليدوي بدقة كافية بالمحرك المجاني الحالي (نتيجة مشوّشة بأحرف أجنبية) — "
-            "تحقق من استقامة الصورة عمودياً باستخدام «🔄 تدوير 90°»، أو فعّل Groq Llama 4 Scout / Gemini Flash لقراءة الخط اليدوي بدقة."
+            "تعذرت قراءة الخط اليدوي بدقة كافية بالمحرك الحالي (نتيجة مشوّشة بأحرف أجنبية) — "
+            "تحقق من استقامة الصورة عمودياً باستخدام «🔄 تدوير 90°»، أو فعّل Groq qwen/qwen3.8-27b / Gemini Flash."
         )
 
     conf = float(analysis.get("ai_confidence") or 0.0)
-    if conf < 0.35 and (not extracted.get("subject") or not extracted.get("summary")):
+    subj_str = str(extracted.get("subject") or "")
+    has_party = bool(extracted.get("complainants") or extracted.get("respondents"))
+    if conf < 0.35 and (not subj_str or not extracted.get("summary") or not has_party or "غير مقروء" in subj_str):
         return "تعذر استخراج نص واضح من الصورة لانخفاض الدقة أو عدم وضوح الخط اليدوي — يرجى التصوير بشكل أقرب وعمودي أو الإدخال يدوياً."
 
     return ""

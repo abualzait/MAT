@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.4${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.5${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -1001,6 +1001,63 @@
         }
     }
 
+    async function rotatePendingScanFile(degrees = 90) {
+        const file = state.pendingScanFile;
+        if (!file) {
+            pcToast('يرجى اختيار صورة أولاً للتدوير', true);
+            return;
+        }
+        const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
+            || String(file.name || '').toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+            pcToast('التدوير متاح للصور فقط', true);
+            return;
+        }
+        if (typeof createImageBitmap !== 'function') {
+            pcToast('المتصفح لا يدعم تدوير الصور مباشرة', true);
+            return;
+        }
+
+        try {
+            const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+            const rad = ((degrees % 360) * Math.PI) / 180;
+            const swapAxes = Math.abs(degrees % 180) === 90;
+            const outW = swapAxes ? bitmap.height : bitmap.width;
+            const outH = swapAxes ? bitmap.width : bitmap.height;
+            const canvas = document.createElement('canvas');
+            canvas.width = outW;
+            canvas.height = outH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                bitmap.close?.();
+                pcToast('تعذر تدوير الصورة في المتصفح', true);
+                return;
+            }
+            ctx.translate(outW / 2, outH / 2);
+            ctx.rotate(rad);
+            ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+            bitmap.close?.();
+
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+            if (!blob) {
+                pcToast('تعذر حفظ الصورة بعد التدوير', true);
+                return;
+            }
+            const cleanName = (normalizeScanFilename(file).replace(/\.[^.]+$/, '') || 'rotated_scan') + '.jpg';
+            const rotatedFile = new File([blob], cleanName, { type: 'image/jpeg', lastModified: Date.now() });
+            state.pendingScanFile = rotatedFile;
+            state.uploadedScans = [];
+            state.uploadedScanIds = [];
+            revokeLocalPreviewUrl();
+            state.pendingLocalPreviewUrl = URL.createObjectURL(rotatedFile);
+            renderIntakePreview(state.pendingLocalPreviewUrl, 'image/jpeg', rotatedFile.name);
+            setExtractionStatus('جاهز لإعادة التحليل بعد التدوير', 'badge-blue');
+            pcToast('تم تدوير الصورة 90° — اضغط «قراءة وتحليل» لإعادة الاستخراج');
+        } catch (_err) {
+            pcToast('تعذر تدوير الصورة المختارة', true);
+        }
+    }
+
     async function handleSelectedScanFile(file, options = {}) {
         const err = validateScanFile(file);
         if (err) {
@@ -1013,6 +1070,9 @@
 
         const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
             || String(file.name || '').toLowerCase().endsWith('.pdf');
+        const rotateBtn = $('pcRotateScanBtn');
+        if (rotateBtn) rotateBtn.style.display = isPdf ? 'none' : 'inline-flex';
+
         state.pendingLocalPreviewUrl = URL.createObjectURL(file);
 
         renderIntakePreview(state.pendingLocalPreviewUrl, isPdf ? 'application/pdf' : file.type, file.name);
@@ -1149,6 +1209,7 @@
 
         state.pendingScanFile = null;
         state.pendingAssignedOfficerId = null;
+        if ($('pcRotateScanBtn')) $('pcRotateScanBtn').style.display = 'none';
         revokeLocalPreviewUrl();
         state.uploadedScans = [];
         state.uploadedScanIds = [];
@@ -2906,6 +2967,10 @@
 
         $('pcCameraBtn')?.addEventListener('click', () => {
             $('pcCameraFileInput')?.click();
+        });
+
+        $('pcRotateScanBtn')?.addEventListener('click', () => {
+            rotatePendingScanFile(90);
         });
 
         $('pcScanAnalyzeBtn')?.addEventListener('click', () => {

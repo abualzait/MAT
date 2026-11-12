@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
@@ -698,7 +699,8 @@ class TestLlmEngine(unittest.TestCase):
         self.assertEqual(res_rf["extracted"]["subject"], "شكوى اختبار")
         self.assertIn("response_format", sent_payloads[0])
         self.assertNotIn("response_format", sent_payloads[1])
-        self.assertEqual(sent_payloads[0]["temperature"], 0.0)
+        self.assertEqual(sent_payloads[0]["temperature"], 0.1)
+        self.assertEqual(sent_payloads[0]["frequency_penalty"], 0.2)
         self.assertEqual(sent_payloads[0]["messages"][0]["content"][1]["image_url"]["detail"], "high")
         self.assertIn("google/gemma-4-31b-it:free", sent_payloads[0]["models"])
 
@@ -822,6 +824,91 @@ class TestLlmEngine(unittest.TestCase):
         redacted = mat_llm_engine._redact_secret("Auth failed for nvapi-FakeTestKey1234567890ABCD")
         self.assertNotIn("FakeTestKey", redacted)
         self.assertIn("[REDACTED]", redacted)
+
+        # Groq gsk_ keys resolve cleanly to api.groq.com/openai/v1
+        self.assertEqual(
+            mat_llm_engine._resolve_openai_base_url("", "gsk_FakeGroqKey123456"),
+            "https://api.groq.com/openai/v1",
+        )
+
+    def test_cross_provider_fallback_and_rfc7807_error_formatting(self):
+        # RFC 7807 NVIDIA 404 body formats cleanly without duplicated "HTTP Error 404: HTTP 404:"
+        rfc_err = urllib.error.HTTPError(
+            url="https://integrate.api.nvidia.com/v1/chat/completions",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=io.BytesIO(b'{"status":404,"title":"Not Found","detail":"Function id missing"}'),
+        )
+        fb_ok_resp = mock.MagicMock()
+        fb_ok_resp.read.return_value = json.dumps(
+            {
+                "model": "dots-studio/dots-3-note-preview:free",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "raw_transcription": "شكوى اختبار",
+                                    "subject": "موضوع بديل",
+                                    "summary": "تفاصيل واضحة",
+                                    "ai_recommended_action": "اتصال هاتفي",
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ],
+            }
+        ).encode("utf-8")
+        fb_ok_resp.__enter__.return_value = fb_ok_resp
+
+        nim_settings = {
+            "provider": "openai",
+            "model_name": "google/gemma-4-31b-it",
+            "api_base_url": "https://integrate.api.nvidia.com/v1",
+            "api_key": "nvapi-PrimaryDeadKey1234567890",
+            "is_enabled": 1,
+        }
+
+        called_urls = []
+
+        def fake_failover(req, timeout=60):
+            called_urls.append(req.full_url)
+            if "integrate.api.nvidia.com" in req.full_url:
+                raise rfc_err
+            return fb_ok_resp
+
+        # 1) Without fallback configured, returns clean single HTTP 404 message
+        err_only = mat_llm_engine._format_http_error(
+            urllib.error.HTTPError(
+                url="https://integrate.api.nvidia.com/v1/chat/completions",
+                code=404,
+                msg="HTTP 404: Not Found: Function id missing",
+                hdrs=None,
+                fp=None,
+            )
+        )
+        self.assertEqual(err_only, "HTTP 404: Not Found: Function id missing")
+
+        # 2) With MAT_FALLBACK_OPENAI_API_KEY configured, fails over cleanly to OpenRouter
+        with mock.patch.dict(
+            os.environ,
+            {
+                "MAT_FALLBACK_OPENAI_API_KEY": "sk-or-v1-FallbackKey1234567890",
+                "MAT_FALLBACK_OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+                "MAT_FALLBACK_LLM_MODEL": "google/gemma-4-31b-it:free",
+            },
+            clear=False,
+        ):
+            with mock.patch("urllib.request.urlopen", side_effect=fake_failover):
+                res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", nim_settings)
+
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["model"], "dots-studio/dots-3-note-preview:free")
+        self.assertEqual(len(called_urls), 2)
+        self.assertIn("integrate.api.nvidia.com", called_urls[0])
+        self.assertIn("openrouter.ai", called_urls[1])
 
 
 class TestComplaintsUtilities(unittest.TestCase):

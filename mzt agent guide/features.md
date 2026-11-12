@@ -1,6 +1,13 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.4)
+## Current Features (Version 1.46.5)
+
+### التحديث v1.46.5 (التحويل التلقائي بين المزودين `MAT_FALLBACK_*`، منع تكرار OpenRouter، وتدوير صور الكاميرا 90°)
+1. **مرونة التحويل التلقائي بين المزودين (`mat_llm_engine.py`):**
+   - إضافة `_get_fallback_openai_settings` و`_extract_with_single_provider` لدعم التحويل التلقائي إلى مزود احتياطي عبر متغيرات `MAT_FALLBACK_OPENAI_API_KEY` / `MAT_FALLBACK_OPENAI_BASE_URL` / `MAT_FALLBACK_LLM_MODEL` عند فشل المزود الأساسي (`HTTP 404/429/402` أو انتهاء المهلة).
+   - تنظيف رسائل أخطاء RFC 7807 في `_format_http_error` دون تكرار البادئة، ودعم التعرف التلقائي على مفاتيح Groq (`gsk_*`)، وضبط `temperature=0.1` و`frequency_penalty=0.2` لنماذج OpenRouter المجانية لمنع حلقات التكرار.
+2. **تدوير صور الكاميرا المائلة في الواجهة (`app.html` و`police_complaints.js`):**
+   - إضافة زر `🔄 تدوير 90°` (`#pcRotateScanBtn` / `rotatePendingScanFile`) لتصحيح الصور الجانبية من كاميرا ويندوز قبل إعادة التحليل.
 
 ### التحديث v1.46.4 (اعتماد NVIDIA NIM مع نموذج `google/gemma-4-31b-it` وتوافق المفاتيح وضغط صور المسح)
 1. **تكامل NVIDIA NIM (`integrate.api.nvidia.com/v1`) في `mat_llm_engine.py`:**

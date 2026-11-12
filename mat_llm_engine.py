@@ -121,7 +121,7 @@ def _redact_secret(text: str, secret: Optional[str] = None) -> str:
 
 
 def _format_http_error(exc: urllib.error.HTTPError, api_key: str = "") -> str:
-    """Extract concise provider error details from an HTTPError without exposing secrets."""
+    """Extract concise provider error details from an HTTPError without exposing secrets or duplicate prefixes."""
     detail = ""
     try:
         raw = exc.read()
@@ -133,6 +133,10 @@ def _format_http_error(exc: urllib.error.HTTPError, api_key: str = "") -> str:
                     err_obj = parsed.get("error") if isinstance(parsed, dict) else None
                     if isinstance(err_obj, dict) and err_obj.get("message"):
                         detail = str(err_obj["message"]).strip()
+                    elif isinstance(parsed, dict) and parsed.get("detail"):
+                        title = str(parsed.get("title") or "").strip()
+                        det = str(parsed["detail"]).strip()
+                        detail = f"{title}: {det}" if title else det
                     elif isinstance(parsed, dict) and parsed.get("message"):
                         detail = str(parsed["message"]).strip()
                     else:
@@ -141,6 +145,10 @@ def _format_http_error(exc: urllib.error.HTTPError, api_key: str = "") -> str:
                     detail = raw_text[:280]
     except Exception:
         detail = ""
+    if not detail:
+        raw_msg = str(getattr(exc, "msg", "") or "").strip()
+        if raw_msg and raw_msg.lower() not in ("bad request", "not found", "payment required", "too many requests"):
+            return _redact_secret(raw_msg, api_key)
     base_msg = f"HTTP {exc.code}: {detail}" if detail else str(exc)
     return _redact_secret(base_msg, api_key)
 
@@ -490,12 +498,14 @@ def _is_nvidia_nim_endpoint(base_url: str) -> bool:
 
 
 def _resolve_openai_base_url(raw_base_url: Any, api_key: str) -> str:
-    """Resolve explicit base URL or infer NVIDIA NIM / OpenRouter from key prefix when blank."""
+    """Resolve explicit base URL or infer NVIDIA NIM, Groq, or OpenRouter from key prefix when blank."""
     cleaned = str(raw_base_url or "").strip().rstrip("/")
     if cleaned:
         return cleaned
     if api_key.startswith("nvapi-"):
         return "https://integrate.api.nvidia.com/v1"
+    if api_key.startswith("gsk_"):
+        return "https://api.groq.com/openai/v1"
     if api_key.startswith("sk-or-"):
         return "https://openrouter.ai/api/v1"
     return "https://api.openai.com/v1"
@@ -573,6 +583,7 @@ def _call_openai_with_meta(
         use_high_detail: bool,
         use_openrouter_routing: bool,
         use_reasoning_disable: bool,
+        use_freq_penalty: bool,
     ) -> Dict[str, Any]:
         image_obj: Dict[str, Any] = {"url": f"data:{mime_type};base64,{b64_data}"}
         if use_high_detail:
@@ -589,7 +600,7 @@ def _call_openai_with_meta(
                     ],
                 }
             ],
-            "temperature": 0.0,
+            "temperature": 0.1 if is_free_openrouter else 0.0,
             "max_tokens": 4096,
         }
         if use_openrouter_routing:
@@ -598,6 +609,8 @@ def _call_openai_with_meta(
             payload["models"] = candidates
         if use_reasoning_disable:
             payload["reasoning"] = {"enabled": False}
+        if use_freq_penalty:
+            payload["frequency_penalty"] = 0.2
         if use_response_format:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -607,12 +620,13 @@ def _call_openai_with_meta(
     use_detail = not is_nvidia_nim
     use_or_models = is_free_openrouter
     use_no_reason = is_free_openrouter
+    use_freq_penalty = is_free_openrouter
     req_timeout = 95 if is_nvidia_nim else 75
 
     resp_json: Dict[str, Any] = {}
-    for _attempt in range(5):
+    for _attempt in range(6):
         try:
-            payload = _build_payload(use_rf, use_detail, use_or_models, use_no_reason)
+            payload = _build_payload(use_rf, use_detail, use_or_models, use_no_reason, use_freq_penalty)
             resp_json = _post_openai_chat(url, api_key, payload, timeout=req_timeout)
             break
         except urllib.error.HTTPError as exc:
@@ -633,6 +647,9 @@ def _call_openai_with_meta(
                     changed = True
                 if use_no_reason and "reasoning" in low:
                     use_no_reason = False
+                    changed = True
+                if use_freq_penalty and "frequency_penalty" in low:
+                    use_freq_penalty = False
                     changed = True
                 if use_or_models and "models" in low:
                     use_or_models = False
@@ -803,6 +820,133 @@ def _repair_mixed_script_ocr_json(
         return parsed, ""
 
 
+def _get_fallback_openai_settings(primary_settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Build secondary OpenAI-compatible settings from MAT_FALLBACK_* env vars if configured."""
+    fb_key = os.environ.get("MAT_FALLBACK_OPENAI_API_KEY", "").strip()
+    if not fb_key:
+        return None
+    primary_key = str(primary_settings.get("api_key") or "").strip()
+    fb_base = os.environ.get("MAT_FALLBACK_OPENAI_BASE_URL", "").strip()
+    fb_model = os.environ.get("MAT_FALLBACK_LLM_MODEL", "").strip()
+    if not fb_model:
+        resolved_base = _resolve_openai_base_url(fb_base, fb_key)
+        if _is_openrouter_endpoint(resolved_base):
+            fb_model = OPENROUTER_FREE_VISION_FALLBACKS[0]
+        elif _is_nvidia_nim_endpoint(resolved_base):
+            fb_model = "google/gemma-4-31b-it"
+        elif "api.groq.com" in resolved_base.lower():
+            fb_model = "meta-llama/llama-4-scout-17b-16e-instruct"
+        else:
+            fb_model = _default_model_for_provider("openai")
+    if fb_key == primary_key and fb_model == str(primary_settings.get("model_name") or "").strip():
+        return None
+    return {
+        "provider": "openai",
+        "model_name": fb_model,
+        "api_base_url": fb_base,
+        "api_key": fb_key,
+        "is_enabled": 1,
+    }
+
+
+def _extract_with_single_provider(
+    file_bytes: bytes, mime_type: str, settings: Dict[str, Any]
+) -> Tuple[Dict[str, Any], bool]:
+    """Execute one provider attempt and return (result_dict, is_retriable_failure)."""
+    provider = str(settings.get("provider") or "gemini").lower()
+    model = settings.get("model_name") or _default_model_for_provider(provider)
+    api_key = str(settings.get("api_key") or "").strip()
+
+    raw_text = ""
+    effective_model = model
+    try:
+        if provider == "gemini":
+            raw_text = _call_gemini(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
+        elif provider == "openai":
+            raw_text, effective_model = _call_openai_with_meta(
+                file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT
+            )
+        elif provider == "ollama":
+            raw_text = _call_ollama(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
+        else:
+            return (
+                {
+                    "status": "manual_fallback",
+                    "provider": provider,
+                    "model": model,
+                    "extracted": {},
+                    "analysis": {},
+                    "raw_text": "",
+                    "message": f"Unsupported LLM provider: '{provider}'",
+                },
+                False,
+            )
+
+        parsed = _parse_llm_json(raw_text)
+        if not parsed:
+            return (
+                {
+                    "status": "manual_fallback",
+                    "provider": provider,
+                    "model": effective_model,
+                    "extracted": {},
+                    "analysis": {},
+                    "raw_text": raw_text,
+                    "message": "LLM output could not be parsed as structured JSON",
+                },
+                True,
+            )
+
+        if provider == "openai" and _has_foreign_script_noise(parsed):
+            repaired_parsed, repaired_raw = _repair_mixed_script_ocr_json(parsed, settings)
+            if repaired_raw:
+                parsed = repaired_parsed
+                raw_text = repaired_raw
+
+        extracted, analysis = _normalize_complaint_result(parsed)
+
+        return (
+            {
+                "status": "ok",
+                "provider": provider,
+                "model": effective_model,
+                "extracted": extracted,
+                "analysis": analysis,
+                "raw_text": raw_text,
+                "message": "Extraction and analysis completed successfully",
+            },
+            False,
+        )
+    except urllib.error.HTTPError as e:
+        err_msg = _format_http_error(e, api_key)
+        return (
+            {
+                "status": "manual_fallback",
+                "provider": provider,
+                "model": effective_model,
+                "extracted": {},
+                "analysis": {},
+                "raw_text": raw_text,
+                "message": f"Extraction error: {err_msg}",
+            },
+            True,
+        )
+    except Exception as e:
+        err_msg = _redact_secret(str(e), api_key)
+        return (
+            {
+                "status": "manual_fallback",
+                "provider": provider,
+                "model": effective_model,
+                "extracted": {},
+                "analysis": {},
+                "raw_text": raw_text,
+                "message": f"Extraction error: {err_msg}",
+            },
+            True,
+        )
+
+
 def extract_and_analyze_complaint(
     file_bytes: bytes, mime_type: str, settings: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -824,6 +968,10 @@ def extract_and_analyze_complaint(
 
     api_key = str(settings.get("api_key") or "").strip()
     if provider in ("gemini", "openai") and not api_key:
+        fb_settings = _get_fallback_openai_settings(settings)
+        if fb_settings:
+            fb_res, _ = _extract_with_single_provider(file_bytes, mime_type, fb_settings)
+            return fb_res
         return {
             "status": "manual_fallback",
             "provider": provider,
@@ -834,79 +982,14 @@ def extract_and_analyze_complaint(
             "message": f"API key not configured for provider '{provider}'",
         }
 
-    raw_text = ""
-    effective_model = model
-    try:
-        if provider == "gemini":
-            raw_text = _call_gemini(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
-        elif provider == "openai":
-            raw_text, effective_model = _call_openai_with_meta(
-                file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT
-            )
-        elif provider == "ollama":
-            raw_text = _call_ollama(file_bytes, mime_type, settings, COMPLAINT_EXTRACTION_PROMPT)
-        else:
-            return {
-                "status": "manual_fallback",
-                "provider": provider,
-                "model": model,
-                "extracted": {},
-                "analysis": {},
-                "raw_text": "",
-                "message": f"Unsupported LLM provider: '{provider}'",
-            }
-
-        parsed = _parse_llm_json(raw_text)
-        if not parsed:
-            return {
-                "status": "manual_fallback",
-                "provider": provider,
-                "model": effective_model,
-                "extracted": {},
-                "analysis": {},
-                "raw_text": raw_text,
-                "message": "LLM output could not be parsed as structured JSON",
-            }
-
-        if provider == "openai" and _has_foreign_script_noise(parsed):
-            repaired_parsed, repaired_raw = _repair_mixed_script_ocr_json(parsed, settings)
-            if repaired_raw:
-                parsed = repaired_parsed
-                raw_text = repaired_raw
-
-        extracted, analysis = _normalize_complaint_result(parsed)
-
-        return {
-            "status": "ok",
-            "provider": provider,
-            "model": effective_model,
-            "extracted": extracted,
-            "analysis": analysis,
-            "raw_text": raw_text,
-            "message": "Extraction and analysis completed successfully",
-        }
-    except urllib.error.HTTPError as e:
-        err_msg = _format_http_error(e, api_key)
-        return {
-            "status": "manual_fallback",
-            "provider": provider,
-            "model": effective_model,
-            "extracted": {},
-            "analysis": {},
-            "raw_text": raw_text,
-            "message": f"Extraction error: {err_msg}",
-        }
-    except Exception as e:
-        err_msg = _redact_secret(str(e), api_key)
-        return {
-            "status": "manual_fallback",
-            "provider": provider,
-            "model": effective_model,
-            "extracted": {},
-            "analysis": {},
-            "raw_text": raw_text,
-            "message": f"Extraction error: {err_msg}",
-        }
+    result, retriable = _extract_with_single_provider(file_bytes, mime_type, settings)
+    if retriable:
+        fb_settings = _get_fallback_openai_settings(settings)
+        if fb_settings:
+            fb_res, _ = _extract_with_single_provider(file_bytes, mime_type, fb_settings)
+            if fb_res.get("status") == "ok":
+                return fb_res
+    return result
 
 
 def test_llm_connection(settings: Dict[str, Any]) -> Dict[str, Any]:

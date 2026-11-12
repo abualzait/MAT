@@ -35,6 +35,9 @@ class TestPoliceComplaintsApi(unittest.TestCase):
                 "MAT_OPENAI_API_KEY",
                 "MAT_OPENAI_BASE_URL",
                 "MAT_OLLAMA_URL",
+                "MAT_FALLBACK_OPENAI_API_KEY",
+                "MAT_FALLBACK_OPENAI_BASE_URL",
+                "MAT_FALLBACK_LLM_MODEL",
             )
         }
         for k in cls.orig_llm_env:

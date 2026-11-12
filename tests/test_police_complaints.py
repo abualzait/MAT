@@ -910,6 +910,51 @@ class TestLlmEngine(unittest.TestCase):
         self.assertIn("integrate.api.nvidia.com", called_urls[0])
         self.assertIn("openrouter.ai", called_urls[1])
 
+    def test_anti_hallucination_rejects_dummy_digits_and_garbled_ocr(self):
+        # 1) Reject fabricated repeating IDs/phones (e.g. 1111111111) instead of filling official form
+        hallucinated = {
+            "raw_transcription": "متصرفية لواء قصبة عمان - محافظة 首都\nعطلة مشakra",
+            "paper_date": "11/11/2023",
+            "complainants": [{"party_category": "مواطن", "name": "دينا", "national_id": "1111111111", "phone": "0797771111", "address": "عمان - حي المonical"}],
+            "respondents": [],
+            "subject": "اختبار",
+            "summary": "نص غير واضح",
+            "ai_recommended_action": "اتصال هاتفي",
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {"model": "dots-studio/dots-3-note-preview:free", "choices": [{"message": {"content": json.dumps(hallucinated, ensure_ascii=False)}}]}
+        ).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        settings = {
+            "provider": "openai",
+            "model_name": "gpt-4o",
+            "api_base_url": "https://api.openai.com/v1",
+            "api_key": "sk-proj-testkey",
+            "is_enabled": 1,
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", settings)
+
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertEqual(res["extracted"], {})
+        self.assertIn("غير موثوقة", res["message"])
+
+        # 2) Reject mixed Arabic-Latin splice or CJK even when digits look normal
+        ext_splice, ana_splice = mat_llm_engine._normalize_complaint_result(
+            {
+                "raw_transcription": "حي المonical",
+                "complainants": [{"party_category": "مواطن", "name": "سالم", "national_id": "9851042817", "phone": "0795412890", "address": "عمان - حي المonical"}],
+                "respondents": [],
+                "subject": "موضوع",
+                "summary": "تفاصيل واضحة",
+                "ai_confidence": 0.9,
+            }
+        )
+        reason = mat_llm_engine._detect_unreliable_extraction(ext_splice, ana_splice)
+        self.assertIn("تعذرت قراءة الخط اليدوي", reason)
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

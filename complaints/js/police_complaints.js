@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.8${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.9${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -1159,6 +1159,21 @@
 
         renderIntakePreview(state.pendingLocalPreviewUrl, isPdf ? 'application/pdf' : file.type, file.name);
         setExtractionStatus('جاري تجهيز الوثيقة...', 'badge-blue');
+
+        if (!isPdf && options.autoExtract !== false && typeof createImageBitmap === 'function') {
+            try {
+                const probe = await createImageBitmap(file, { imageOrientation: 'from-image' });
+                const isLandscape = probe.width > probe.height * 1.15;
+                probe.close?.();
+                if (isLandscape) {
+                    setExtractionStatus('📐 الصورة أفقية — استخدم «🔄 تدوير 90°» لاستقامتها ثم اضغط «قراءة وتحليل»', 'badge-yellow');
+                    pcToast('تظهر الصورة بالوضع الأفقي — دوّرها عمودياً عبر «🔄 تدوير 90°» قبل القراءة بالذكاء الاصطناعي');
+                    return;
+                }
+            } catch (_err) {
+                // Fall through to auto-extract when orientation probe is unavailable
+            }
+        }
 
         if (options.autoExtract !== false) {
             await runScanExtraction();

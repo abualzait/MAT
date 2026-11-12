@@ -791,7 +791,7 @@ def _repair_mixed_script_ocr_json(
         "1) صحّح فقط الكلمات الأجنبية أو المشوشة في الحقول النصية لتصبح عربية سليمة ومطابقة لسياق الشكوى تماماً دون اختراع وقائع غير موجودة.\n"
         "2) حافظ على جميع الأسماء والأرقام الوطنية وأرقام الهواتف والتواريخ كما هي حرفياً دون تغيير أي رقم.\n"
         "3) إذا ورد في النص إقرار مثل (أقر بعدم وجود قضية منظورة أمام المحاكم... نعم / ✓) اجعل `no_pending_lawsuit_declared` قيمتها `true`.\n"
-        "4) اكتب `police_necessity_reason` و`ai_analysis` و`ai_solution_recommendation` باللغة العربية الفصحى الرسمية فقط.\n"
+        "4) اكتب `police_necessity_reason` و`ai_analysis` و`ai_solution_recommendation` باللغة العربية الفصحى الرسمية فقط (ممنوع تماماً كتابة أي كلمة إنجليزية).\n"
         "5) التزم في `ai_recommended_action` بأحد الخيارات الأربعة فقط: "
         "'توديع عن طريق مركز أمني' أو 'اتصال هاتفي' أو 'توديع مغفور' أو 'حفظ / توجيه للقضاء المختص'.\n"
         "6) أعد كائن JSON صالحاً فقط بنفس المفاتيح بدون أي نص خارجه."
@@ -846,6 +846,52 @@ def _get_fallback_openai_settings(primary_settings: Dict[str, Any]) -> Optional[
         "api_key": fb_key,
         "is_enabled": 1,
     }
+
+
+_CJK_OR_CYRILLIC_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\u0400-\u04ff\uac00-\ud7af]")
+_ARABIC_LATIN_SPLICE_RE = re.compile(r"[\u0600-\u06FF][A-Za-z]|[A-Za-z][\u0600-\u06FF]")
+_REPEATED_DUMMY_DIGITS_RE = re.compile(r"(\d)\1{5,}")
+
+
+def _detect_unreliable_extraction(
+    extracted: Dict[str, Any], analysis: Dict[str, Any]
+) -> str:
+    """Return a clear Arabic reason when OCR shows hallucinated dummy IDs or garbled non-Arabic text."""
+    for list_key in ("complainants", "respondents"):
+        for row in extracted.get(list_key) or []:
+            if not isinstance(row, dict):
+                continue
+            for num_key in ("national_id", "phone"):
+                digits = re.sub(r"\D", "", str(row.get(num_key) or ""))
+                if digits and _REPEATED_DUMMY_DIGITS_RE.search(digits):
+                    return (
+                        "القراءة الآلية غير موثوقة (ظهر رقم مكرر مُختلق نتيجة عدم وضوح الخط أو ميلان الصورة) — "
+                        "تأكد من تدوير الورقة عمودياً أو أدخل البيانات يدوياً؛ ولأعلى دقة للخط اليدوي فعّل Google Gemini Flash أو Groq Llama 4 Scout."
+                    )
+
+    text_fields: List[str] = [
+        str(extracted.get("raw_transcription") or ""),
+        str(extracted.get("subject") or ""),
+        str(extracted.get("summary") or ""),
+    ]
+    for list_key in ("complainants", "respondents"):
+        for row in extracted.get(list_key) or []:
+            if isinstance(row, dict):
+                text_fields.append(str(row.get("name") or ""))
+                text_fields.append(str(row.get("address") or ""))
+
+    combined = "\n".join(text_fields)
+    if _CJK_OR_CYRILLIC_RE.search(combined) or len(_ARABIC_LATIN_SPLICE_RE.findall(combined)) >= 1:
+        return (
+            "تعذرت قراءة الخط اليدوي بدقة كافية بالمحرك المجاني الحالي (نتيجة مشوّشة بأحرف أجنبية) — "
+            "تحقق من استقامة الصورة عمودياً باستخدام «🔄 تدوير 90°»، أو فعّل Groq Llama 4 Scout / Gemini Flash لقراءة الخط اليدوي بدقة."
+        )
+
+    conf = float(analysis.get("ai_confidence") or 0.0)
+    if conf < 0.35 and (not extracted.get("subject") or not extracted.get("summary")):
+        return "تعذر استخراج نص واضح من الصورة لانخفاض الدقة أو عدم وضوح الخط اليدوي — يرجى التصوير بشكل أقرب وعمودي أو الإدخال يدوياً."
+
+    return ""
 
 
 def _extract_with_single_provider(
@@ -903,6 +949,21 @@ def _extract_with_single_provider(
                 raw_text = repaired_raw
 
         extracted, analysis = _normalize_complaint_result(parsed)
+
+        unreliable_reason = _detect_unreliable_extraction(extracted, analysis)
+        if unreliable_reason:
+            return (
+                {
+                    "status": "manual_fallback",
+                    "provider": provider,
+                    "model": effective_model,
+                    "extracted": {},
+                    "analysis": {},
+                    "raw_text": raw_text,
+                    "message": unreliable_reason,
+                },
+                False,
+            )
 
         return (
             {

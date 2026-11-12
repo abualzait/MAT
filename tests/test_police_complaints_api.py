@@ -855,6 +855,24 @@ class TestPoliceComplaintsApi(unittest.TestCase):
             self.assertEqual(self._req(off_op, off_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan1_id}")[0], 404)
             self.assertEqual(self._req(off_op, off_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan2_id}")[0], 200)
 
+        # Verify respondent street station matching API & 3-section UI classes
+        st, _, mraw = self._req(
+            off_op,
+            off_jar,
+            "GET",
+            "/api/v1/mat/police-complaints/match-station?address=" + urllib.parse.quote("عمان - شارع المدينة المنورة - عمارة السلام"),
+        )
+        self.assertEqual(st, 200)
+        mjson = json.loads(mraw.decode("utf-8"))
+        self.assertEqual(mjson["nearest_station"], "مركز أمن تلاع العلي")
+
+        st, _, html_raw = self._req(off_op, off_jar, "GET", "/complaints/app.html")
+        self.assertEqual(st, 200)
+        html_txt = html_raw.decode("utf-8")
+        self.assertIn("pc-panel-extracted", html_txt)
+        self.assertIn("pc-panel-ai", html_txt)
+        self.assertIn("pc-panel-action", html_txt)
+
 
 if __name__ == "__main__":
     unittest.main()

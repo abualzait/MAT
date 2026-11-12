@@ -238,9 +238,144 @@ def _load_areas(base_dir: str) -> list[dict]:
     return _AREAS_CACHE
 
 
+_AMMAN_STREET_STATION_RULES = [
+    {
+        "tokens": ("شارع المدينه المنوره", "طريق المدينه المنوره", "دوار المدينه المنوره", "المدينه المنوره شارع"),
+        "avoid_if_tokens": ("ماركا", "اسكان ماركا"),
+        "area_name": "شارع المدينة المنورة (تلاع العلي)",
+        "nearest_station": "مركز أمن تلاع العلي",
+        "police_directorate": "مديرية شرطة شمال عمان",
+        "liwa_name": "لواء الجامعة",
+        "lat": 31.9911,
+        "lon": 35.8683,
+    },
+    {
+        "tokens": ("شارع مكه المكرمه", "شارع مكه", "طريق مكه", "دوار الكيلو", "دوار الحرمين", "مجمع جبر"),
+        "avoid_if_tokens": ("ماركا", "اسكان ماركا"),
+        "area_name": "شارع مكة المكرمة (تلاع العلي / الكيلو)",
+        "nearest_station": "مركز أمن تلاع العلي",
+        "police_directorate": "مديرية شرطة شمال عمان",
+        "liwa_name": "لواء الجامعة",
+        "lat": 31.9766,
+        "lon": 35.8620,
+    },
+    {
+        "tokens": ("شارع عبدالله غوشه", "شارع عبد الله غوشه", "شارع غوشه", "عبدالله غوشه", "الصويفيه", "ام اذينه", "الدوار السابع", "الدوار الثامن"),
+        "avoid_if_tokens": (),
+        "area_name": "شارع عبدالله غوشة / الصويفية",
+        "nearest_station": "مركز أمن البيادر",
+        "police_directorate": "مديرية شرطة جنوب عمان",
+        "liwa_name": "لواء وادي السير",
+        "lat": 31.9530,
+        "lon": 35.8560,
+    },
+    {
+        "tokens": ("شارع وصفي التل", "الجاردنز", "شارع الملكه رانيا", "شارع الجامعه الاردنيه", "الجامعه الاردنيه"),
+        "avoid_if_tokens": (),
+        "area_name": "شارع وصفي التل / الجامعة",
+        "nearest_station": "مركز أمن ضاحية الرشيد",
+        "police_directorate": "مديرية شرطة شمال عمان",
+        "liwa_name": "لواء الجامعة",
+        "lat": 31.9853,
+        "lon": 35.8807,
+    },
+    {
+        "tokens": ("شارع خليل السالم", "خلدا"),
+        "avoid_if_tokens": (),
+        "area_name": "خلدا / شارع خليل السالم",
+        "nearest_station": "مركز أمن تلاع العلي",
+        "police_directorate": "مديرية شرطة شمال عمان",
+        "liwa_name": "لواء الجامعة",
+        "lat": 31.9950,
+        "lon": 35.8450,
+    },
+    {
+        "tokens": ("شارع زهران", "الدوار الثالث", "الدوار الرابع", "الدوار الخامس", "دوار عبدون", "عبدون"),
+        "avoid_if_tokens": (),
+        "area_name": "شارع زهران / جبل عمان",
+        "nearest_station": "مركز أمن زهران",
+        "police_directorate": "مديرية شرطة وسط عمان",
+        "liwa_name": "لواء قصبة عمان",
+        "lat": 31.9540,
+        "lon": 35.9050,
+    },
+    {
+        "tokens": ("شارع الملك حسين", "العبدلي", "دوار الداخليه"),
+        "avoid_if_tokens": (),
+        "area_name": "العبدلي / شارع الملك حسين",
+        "nearest_station": "مركز أمن الشميساني",
+        "police_directorate": "مديرية شرطة وسط عمان",
+        "liwa_name": "لواء قصبة عمان",
+        "lat": 31.9680,
+        "lon": 35.9050,
+    },
+    {
+        "tokens": ("الدوار الاول", "الدوار الثاني", "شارع الرينبو", "جبل اللويبده", "دوار باريس", "دوار الشابسوغ"),
+        "avoid_if_tokens": (),
+        "area_name": "وسط البلد / جبل عمان",
+        "nearest_station": "مركز أمن المدينة",
+        "police_directorate": "مديرية شرطة وسط عمان",
+        "liwa_name": "لواء قصبة عمان",
+        "lat": 31.9515,
+        "lon": 35.9300,
+    },
+    {
+        "tokens": ("شارع الاستقلال",),
+        "avoid_if_tokens": (),
+        "area_name": "شارع الاستقلال",
+        "nearest_station": "مركز أمن النزهة",
+        "police_directorate": "مديرية شرطة وسط عمان",
+        "liwa_name": "لواء قصبة عمان",
+        "lat": 31.9750,
+        "lon": 35.9350,
+    },
+    {
+        "tokens": ("شارع الحريه",),
+        "avoid_if_tokens": (),
+        "area_name": "شارع الحرية",
+        "nearest_station": "مركز أمن المقابلين",
+        "police_directorate": "مديرية شرطة جنوب عمان",
+        "liwa_name": "لواء القويسمة",
+        "lat": 31.9180,
+        "lon": 35.9180,
+    },
+]
+
+
+def _resolve_real_station_item(item: dict, real_station_areas: list) -> dict:
+    """Resolve generic 'أقرب مركز أمني' placeholder rows to nearest real police station by coordinates."""
+    closest = str(item.get("closest") or "").strip()
+    if closest and closest != "أقرب مركز أمني":
+        return {
+            "area_name": item.get("name") or "",
+            "nearest_station": closest,
+            "police_directorate": item.get("directorate") or "",
+            "liwa_name": item.get("liwa") or "",
+            "lat": item.get("lat"),
+            "lon": item.get("lon"),
+        }
+
+    lat = item.get("lat")
+    lon = item.get("lon")
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and real_station_areas:
+        nearest = min(
+            real_station_areas,
+            key=lambda a: (float(a["lat"]) - float(lat)) ** 2 + (float(a["lon"]) - float(lon)) ** 2,
+        )
+        return {
+            "area_name": item.get("name") or nearest.get("name") or "",
+            "nearest_station": nearest.get("closest") or "",
+            "police_directorate": nearest.get("directorate") or "",
+            "liwa_name": nearest.get("liwa") or "",
+            "lat": lat,
+            "lon": lon,
+        }
+    return {}
+
+
 def match_nearest_police_station(address: str, base_dir: str) -> dict:
     """
-    Match an address string against data/amman_areas.json.
+    Match an address string against famous Amman street aliases and data/amman_areas.json.
     Returns nearest station, directorate, liwa, lat, lon, and top candidates.
     """
     default_res = {
@@ -265,8 +400,33 @@ def match_nearest_police_station(address: str, base_dir: str) -> dict:
     if not norm_addr:
         return default_res
 
+    real_station_areas = [
+        a for a in areas
+        if str(a.get("closest") or "").strip() not in ("", "أقرب مركز أمني")
+        and isinstance(a.get("lat"), (int, float))
+        and isinstance(a.get("lon"), (int, float))
+    ]
+
+    # Check explicit Amman main street & landmark aliases before ambiguous neighborhood substrings
+    street_override = None
+    best_alias_len = 0
+    for rule in _AMMAN_STREET_STATION_RULES:
+        if rule["avoid_if_tokens"] and any(av in norm_addr for av in rule["avoid_if_tokens"]):
+            continue
+        for tok in rule["tokens"]:
+            if tok in norm_addr and len(tok) > best_alias_len:
+                best_alias_len = len(tok)
+                street_override = {
+                    "area_name": rule["area_name"],
+                    "nearest_station": rule["nearest_station"],
+                    "police_directorate": rule["police_directorate"],
+                    "liwa_name": rule["liwa_name"],
+                    "lat": rule["lat"],
+                    "lon": rule["lon"],
+                }
+
     addr_words = [w for w in norm_addr.split() if len(w) > 1]
-    stopwords = {"عمان", "شارع", "قرب", "دوار", "منطقه", "حوض", "حي", "مقابل", "خلف", "بجانب", "مجمع"}
+    stopwords = {"عمان", "شارع", "قرب", "دوار", "منطقه", "حوض", "حي", "مقابل", "خلف", "بجانب", "مجمع", "عماره", "طابق", "شقه"}
 
     scored = []
     for area in areas:
@@ -284,7 +444,7 @@ def match_nearest_police_station(address: str, base_dir: str) -> dict:
         # Exact substring matches
         if name_norm and name_norm in norm_addr:
             score += len(name_norm) * 50
-        if closest_norm and closest_norm in norm_addr:
+        if closest_norm and closest != "أقرب مركز أمني" and closest_norm in norm_addr:
             score += len(closest_norm) * 40
 
         # Word overlap
@@ -292,9 +452,10 @@ def match_nearest_police_station(address: str, base_dir: str) -> dict:
             if len(w) > 1 and w in addr_words and w not in stopwords:
                 score += len(w) * 15
 
-        for w in closest_norm.split():
-            if len(w) > 1 and w in addr_words and w not in stopwords:
-                score += len(w) * 10
+        if closest != "أقرب مركز أمني":
+            for w in closest_norm.split():
+                if len(w) > 1 and w in addr_words and w not in stopwords:
+                    score += len(w) * 10
 
         for w in liwa_norm.split():
             if len(w) > 1 and w in addr_words and w not in stopwords:
@@ -307,38 +468,38 @@ def match_nearest_police_station(address: str, base_dir: str) -> dict:
         if score > 0:
             scored.append((score, area))
 
-    if not scored:
+    if not scored and not street_override:
         return default_res
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    best = scored[0][1]
 
-    # Collect top unique candidate stations
     candidates = []
     seen_stations = set()
-    for _, item in scored:
-        st = item.get("closest") or ""
-        if st and st not in seen_stations:
+    if street_override:
+        seen_stations.add(street_override["nearest_station"])
+        candidates.append(street_override)
+
+    for _, raw_item in scored:
+        resolved = _resolve_real_station_item(raw_item, real_station_areas)
+        st = resolved.get("nearest_station") or ""
+        if st and st != "أقرب مركز أمني" and st not in seen_stations:
             seen_stations.add(st)
-            candidates.append({
-                "area_name": item.get("name") or "",
-                "nearest_station": st,
-                "police_directorate": item.get("directorate") or "",
-                "liwa_name": item.get("liwa") or "",
-                "lat": item.get("lat"),
-                "lon": item.get("lon"),
-            })
+            candidates.append(resolved)
             if len(candidates) >= 5:
                 break
 
+    if not candidates:
+        return default_res
+
+    best = candidates[0]
     return {
         "matched": True,
-        "area_name": best.get("name") or "",
-        "nearest_station": best.get("closest") or "",
-        "police_directorate": best.get("directorate") or "",
-        "liwa_name": best.get("liwa") or "",
-        "lat": best.get("lat"),
-        "lon": best.get("lon"),
+        "area_name": best["area_name"],
+        "nearest_station": best["nearest_station"],
+        "police_directorate": best["police_directorate"],
+        "liwa_name": best["liwa_name"],
+        "lat": best["lat"],
+        "lon": best["lon"],
         "candidates": candidates,
     }
 

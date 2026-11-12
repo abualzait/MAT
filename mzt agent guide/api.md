@@ -57,7 +57,7 @@ All core API endpoints are prefixed with `/api/v1/mat/` (legacy `/api/...` paths
       "model": "...",
       "detected_rotation_cw": 0,
       "extracted": { "raw_transcription": "...", "paper_date": "...", "complainants": [], "respondents": [], "subject": "...", "summary": "...", "has_signature": true, "no_pending_lawsuit_declared": true },
-      "analysis": { "is_minor_police_complaint": true, "police_necessity_reason": "...", "ai_analysis": "...", "ai_solution_recommendation": "...", "ai_recommended_action": "...", "ai_confidence": 0.92 },
+      "analysis": { "is_minor_police_complaint": true, "jurisdiction_scope": "الحاكم الإداري", "competent_authority": "...", "police_necessity_reason": "...", "ai_analysis": "...", "ai_solution_recommendation": "...", "ai_recommended_action": "...", "ai_confidence": 0.92 },
       "raw_text": "...",
       "message": "...",
       "station_match": { "matched": true, "nearest_station": "...", "police_directorate": "...", "liwa_name": "...", "lat": 31.99, "lon": 35.88, "candidates": [] }

@@ -3708,6 +3708,118 @@ input:checked + .slider:before {
   border-bottom: 1px solid #fed7aa;
 }
 
+/* 3-Section Intake Layout: Top Scanner/Preview, Side-by-Side (Extracted vs AI), Bottom Action & Notes */
+.pc-scan-top-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.15fr) minmax(240px, 0.85fr);
+  gap: 1.15rem;
+  align-items: stretch;
+  margin-bottom: 1.25rem;
+}
+.pc-scan-top-row .pc-scan-preview-area {
+  margin-top: 0;
+  min-height: 190px;
+}
+
+.pc-two-sections-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.15fr) minmax(300px, 0.95fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin-bottom: 1.25rem;
+}
+
+.pc-panel-section {
+  border-radius: 16px;
+  padding: 1rem 1.15rem;
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.pc-panel-extracted {
+  border-color: #99f6e4;
+  border-top: 4px solid #0d9488;
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 90px);
+}
+
+.pc-panel-ai {
+  border-color: #ddd6fe;
+  border-top: 4px solid #7c3aed;
+  background: linear-gradient(180deg, #faf5ff 0%, #ffffff 90px);
+  position: sticky;
+  top: 1rem;
+}
+
+.pc-panel-action {
+  border-color: #bfdbfe;
+  border-top: 4px solid #2563eb;
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 80px);
+}
+
+.pc-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.7rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.pc-panel-header h4 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.pc-ai-placeholder {
+  border: 1.5px dashed #c4b5fd;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 1.4rem 1rem;
+  text-align: center;
+}
+
+.pc-jurisdiction-callout {
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  background: #ffffff;
+  border: 1.5px solid #c4b5fd;
+  border-inline-start: 4px solid #6d28d9;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.pc-jurisdiction-callout.is-police {
+  border-color: #99f6e4;
+  border-inline-start-color: #0f766e;
+}
+
+.pc-jurisdiction-callout.is-judicial {
+  border-color: #fecaca;
+  border-inline-start-color: #dc2626;
+}
+
+.pc-jurisdiction-callout.is-external {
+  border-color: #fde68a;
+  border-inline-start-color: #d97706;
+}
+
+@media (max-width: 1024px) {
+  .pc-scan-top-row,
+  .pc-two-sections-grid {
+    grid-template-columns: 1fr;
+  }
+  .pc-panel-ai {
+    position: static;
+  }
+}
+
 /* Official Police Complaint Print Sheet */
 @media print {
   .pc-no-print,

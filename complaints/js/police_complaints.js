@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.12${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.13${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -906,16 +906,50 @@
         }));
     }
 
+    function buildJurisdictionCallout(scopeRaw, authorityRaw, isMinor) {
+        const scope = String(scopeRaw || '').trim();
+        const authority = String(authorityRaw || '').trim();
+        if (!scope && !authority) return null;
+
+        let toneClass = '';
+        let icon = '🏛️';
+        if (scope === 'مركز الشرطة' || authority.includes('مركز الشرطة')) {
+            toneClass = 'is-police';
+            icon = '🚔';
+        } else if (scope === 'القضاء المختص' || authority.includes('القضاء') || authority.includes('النيابة')) {
+            toneClass = 'is-judicial';
+            icon = '⚖️';
+        } else if (['حماية المستهلك', 'أمانة عمان / البلدية', 'الجرائم الإلكترونية', 'جهة رقابية أخرى'].includes(scope)) {
+            toneClass = 'is-external';
+            icon = '🏢';
+        } else if (!isMinor) {
+            toneClass = 'is-judicial';
+            icon = '⚖️';
+        }
+
+        return createEl('div', { className: `pc-jurisdiction-callout ${toneClass}` }, [
+            createEl('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', flexWrap: 'wrap' } }, [
+                createEl('strong', { style: { fontSize: '0.84rem', color: '#0F172A' }, textContent: `${icon} الجهة المختصة وصاحبة الصلاحية` }),
+                scope ? createEl('span', { className: 'badge badge-purple', textContent: scope }) : null
+            ]),
+            authority ? createEl('div', { style: { fontSize: '0.86rem', fontWeight: '700', color: '#1E293B' }, textContent: authority }) : null
+        ]);
+    }
+
     function renderAiAnalysisBox(scanResponse, isPdfFile) {
         renderOcrExtractedBox(scanResponse);
         const box = $('pcAiAnalysisBox');
+        const placeholder = $('pcAiAnalysisPlaceholder');
         if (!box) return;
         box.replaceChildren();
 
         if (!scanResponse) {
             box.style.display = 'none';
+            if (placeholder) placeholder.style.display = '';
             return;
         }
+
+        if (placeholder) placeholder.style.display = 'none';
 
         const status = scanResponse.status || 'manual_fallback';
         const provider = String(scanResponse.provider || '').toLowerCase();
@@ -959,20 +993,27 @@
             })
         ]));
 
+        const jurisdictionNode = buildJurisdictionCallout(
+            analysis.jurisdiction_scope,
+            analysis.competent_authority,
+            isMinor
+        );
+        if (jurisdictionNode) box.appendChild(jurisdictionNode);
+
         box.appendChild(createEl('div', {
             style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }
         }, [
             createEl('span', {
                 className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
-                textContent: isMinor ? '✅ مشكلة خفيفة تتطلب شرطة' : '⚖️ غير مشمولة / قضائية'
+                textContent: isMinor ? '✅ ضمن الاختصاص الإداري / الشرطي' : '⚖️ خارج الاختصاص الأمني المباشر / إحالة'
             }),
             provider ? createEl('small', { style: { fontSize: '0.75rem', color: 'var(--text-secondary)' }, textContent: `${provider}${model ? ` (${model})` : ''}` }) : null
         ]));
 
         const fields = [
-            { label: 'التكييف الشرطي:', value: analysis.police_necessity_reason },
+            { label: 'سبب الاختصاص والصلاحية:', value: analysis.police_necessity_reason },
             { label: 'التحليل الإداري والقانوني:', value: analysis.ai_analysis },
-            { label: 'التوصية بالحل:', value: analysis.ai_solution_recommendation },
+            { label: 'التوصية بالحل وتوجيه الجهة:', value: analysis.ai_solution_recommendation },
             { label: 'الإجراء المقترح:', value: analysis.ai_recommended_action }
         ];
 
@@ -1251,6 +1292,7 @@
             createEl('div', { className: 'pc-scan-steps' }, stepEls)
         ]);
 
+        if ($('pcAiAnalysisPlaceholder')) $('pcAiAnalysisPlaceholder').style.display = 'none';
         aiBox.style.display = 'flex';
         aiBox.replaceChildren(card);
 
@@ -1492,6 +1534,7 @@
             aiBox.style.display = 'none';
             aiBox.replaceChildren();
         }
+        if ($('pcAiAnalysisPlaceholder')) $('pcAiAnalysisPlaceholder').style.display = '';
         setExtractionStatus('جاهز لاستقبال الوثيقة', 'badge-blue');
     }
 
@@ -1637,7 +1680,14 @@
             const ana = state.lastAiResult.analysis || {};
             if (state.lastAiResult.provider) payload.ai_provider = state.lastAiResult.provider;
             if (state.lastAiResult.model) payload.ai_model = state.lastAiResult.model;
-            if (state.lastAiResult.extracted) payload.ai_extracted_json = state.lastAiResult.extracted;
+            if (state.lastAiResult.extracted || ana.jurisdiction_scope || ana.competent_authority) {
+                payload.ai_extracted_json = Object.assign(
+                    {},
+                    state.lastAiResult.extracted || {},
+                    ana.jurisdiction_scope ? { jurisdiction_scope: ana.jurisdiction_scope } : {},
+                    ana.competent_authority ? { competent_authority: ana.competent_authority } : {}
+                );
+            }
             if (typeof ana.is_minor_police_complaint === 'boolean') {
                 payload.is_minor_police_complaint = ana.is_minor_police_complaint;
             }
@@ -2185,6 +2235,17 @@
 
         if (detail.ai_analysis || detail.ai_solution_recommendation || detail.ai_recommended_action) {
             const isMinor = detail.is_minor_police_complaint !== 0 && detail.is_minor_police_complaint !== false;
+            let parsedAiMeta = {};
+            if (detail.ai_extracted_json && typeof detail.ai_extracted_json === 'object') {
+                parsedAiMeta = detail.ai_extracted_json;
+            } else if (typeof detail.ai_extracted_json === 'string' && detail.ai_extracted_json.trim().startsWith('{')) {
+                try { parsedAiMeta = JSON.parse(detail.ai_extracted_json); } catch (_) {}
+            }
+            const detailJurisdictionNode = buildJurisdictionCallout(
+                parsedAiMeta.jurisdiction_scope,
+                parsedAiMeta.competent_authority,
+                isMinor
+            );
             const aiPanel = createEl('div', { className: 'pc-ai-box', style: { marginTop: '0.5rem' } }, [
                 createEl('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' } }, [
                     createEl('span', { className: 'pc-source-pill pc-source-pill-ai', textContent: '🤖 ناتج تحليل واستنتاج الذكاء الاصطناعي' }),
@@ -2192,10 +2253,11 @@
                         ? createEl('small', { className: 'text-muted', textContent: `${detail.ai_provider}${detail.ai_model ? ` / ${detail.ai_model}` : ''}` })
                         : null
                 ]),
+                detailJurisdictionNode,
                 createEl('div', { style: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' } }, [
                     createEl('span', {
                         className: `badge ${isMinor ? 'badge-green' : 'badge-red'}`,
-                        textContent: isMinor ? '✅ تصنيف: مشكلة خفيفة تتطلب شرطة' : '⚖️ تصنيف: غير مشمولة / قضائية'
+                        textContent: isMinor ? '✅ ضمن الاختصاص الإداري / الشرطي' : '⚖️ خارج الاختصاص الأمني المباشر / إحالة'
                     })
                 ]),
                 detail.ai_analysis

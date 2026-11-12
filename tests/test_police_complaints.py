@@ -1037,6 +1037,47 @@ class TestLlmEngine(unittest.TestCase):
         self.assertEqual(mat_llm_engine._normalize_rotation_cw(-90), 270)
         self.assertEqual(mat_llm_engine._normalize_rotation_cw("45"), 0)
 
+    def test_jurisdiction_scope_and_competent_authority_normalization(self):
+        ext, ana = mat_llm_engine._normalize_complaint_result({
+            "subject": "بيع جهاز إلكتروني مقلد ورفض الإرجاع",
+            "summary": "اشترى المشتكي جهازاً غير مطابق للمواصفات.",
+            "is_minor_police_complaint": False,
+            "jurisdiction_scope": "حماية المستهلك",
+            "competent_authority": "مديرية حماية المستهلك — وزارة الصناعة والتجارة",
+            "ai_recommended_action": "حفظ / توجيه للقضاء المختص",
+        })
+        self.assertEqual(ext["subject"], "بيع جهاز إلكتروني مقلد ورفض الإرجاع")
+        self.assertEqual(ana["jurisdiction_scope"], "حماية المستهلك")
+        self.assertIn("حماية المستهلك", ana["competent_authority"])
+
+        # Fallback inference when model omits jurisdiction_scope
+        _, ana2 = mat_llm_engine._normalize_complaint_result({
+            "subject": "إغلاق طريق خاص",
+            "is_minor_police_complaint": True,
+            "ai_recommended_action": "توديع عن طريق مركز أمني",
+            "ai_analysis": "نزاع جوار بسيط يقع ضمن اختصاص الحاكم الإداري لمنع الجرائم.",
+        })
+        self.assertEqual(ana2["jurisdiction_scope"], "الحاكم الإداري")
+        self.assertIn("الحاكم الإداري", ana2["competent_authority"])
+
+    def test_madina_munawwara_and_makkah_streets_match_tla_al_ali_not_marka(self):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        res_madina = mat_complaints_service.match_nearest_police_station(
+            "عمان - شارع المدينة المنورة - عمارة السلام - ط 2 - شقة 8",
+            base_dir,
+        )
+        self.assertTrue(res_madina["matched"])
+        self.assertEqual(res_madina["nearest_station"], "مركز أمن تلاع العلي")
+        self.assertEqual(res_madina["liwa_name"], "لواء الجامعة")
+
+        res_makkah = mat_complaints_service.match_nearest_police_station("عمان - شارع مكة المكرمة", base_dir)
+        self.assertEqual(res_makkah["nearest_station"], "مركز أمن تلاع العلي")
+
+        res_seventh = mat_complaints_service.match_nearest_police_station("عمان - الدوار السابع", base_dir)
+        self.assertTrue(res_seventh["matched"])
+        self.assertNotEqual(res_seventh["nearest_station"], "أقرب مركز أمني")
+        self.assertEqual(res_seventh["nearest_station"], "مركز أمن البيادر")
+
 
 class TestComplaintsUtilities(unittest.TestCase):
     def setUp(self):

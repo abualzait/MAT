@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
 
     <!-- Civic Horizon CSS Design System -->
-    <link rel="stylesheet" href="/complaints/css/design-system.css?v=29">
+    <link rel="stylesheet" href="/complaints/css/design-system.css?v=30">
     
     <!-- Leaflet CSS for unified map -->
     <link rel="stylesheet" href="/leaflet.css">
@@ -39,7 +39,7 @@
                     <h1 class="header-main-title">حقيبة الأدوات المساعدة</h1>
                     <p class="header-jurisdiction">
                         <span>محافظة العاصمة</span>
-                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.46.12</span>
+                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.46.13</span>
                     </p>
                 </div>
                 <button class="sidebar-close-btn" onclick="closeSidebarDrawer()" title="إغلاق القائمة" aria-label="إغلاق القائمة">
@@ -668,159 +668,195 @@
                         <button type="button" class="btn btn-ghost btn-sm" onclick="toggleScannerIntakePanel(false)">✖ إغلاق اللوحة</button>
                     </div>
                     <div class="card-body">
-                        <div class="pc-intake-split">
-                            <!-- Left/Start Pane: Scanner Dropzone, Preview & AI Recommendation -->
-                            <div class="pc-intake-scanner-pane">
-                                <div id="pcDropZone" class="pc-dropzone">
-                                    <div class="pc-dropzone-icon">📄</div>
-                                    <div class="pc-dropzone-title">اسحب صورة الشكوى أو ملف PDF هنا</div>
-                                    <div class="pc-dropzone-sub">يدعم JPG, PNG, WEBP, PDF (حتى 10MB) — أو الصق الصورة مباشرة عبر Ctrl+V</div>
-                                    <div class="pc-dropzone-sub" style="color: var(--accent-primary); margin-top: 0.2rem;">💡 لأدق استخراج للخط اليدوي: صوّر الورقة بشكل مباشر وقريب لتملأ الإطار بإضاءة واضحة</div>
-                                    <input type="file" id="pcScanFileInput"
-                                        accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
-                                        style="display:none;">
-                                    <input type="file" id="pcCameraFileInput"
-                                        accept="image/*" capture="environment"
-                                        style="display:none;">
-                                    <div class="pc-scan-actions">
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('pcScanFileInput').click()">
-                                            📁 اختيار ملف من الجهاز
-                                        </button>
-                                        <button type="button" id="pcCameraBtn" class="btn btn-outline btn-sm">
-                                            📸 التقاط بالكاميرا
-                                        </button>
-                                        <button type="button" id="pcRotateScanBtn" class="btn btn-outline btn-sm" style="display: none;" title="تدوير الصورة المختارة 90 درجة قبل التحليل">
-                                            🔄 تدوير 90°
-                                        </button>
-                                        <button type="button" id="pcScanAnalyzeBtn" class="btn btn-primary btn-sm">
-                                            🤖 قراءة وتحليل بالذكاء الاصطناعي
-                                        </button>
-                                        <button type="button" id="pcResetIntakeBtn" class="btn btn-ghost btn-sm">
-                                            🧹 مسح النموذج
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div id="pcScanPreviewArea" class="pc-scan-preview-area">
-                                    <div class="pc-preview-empty">لم يتم اختيار وثيقة ممسوحة بعد — ستظهر المعاينة هنا</div>
-                                </div>
-
-                                <div id="pcOcrExtractedBox" class="pc-ocr-box" style="display: none;">
-                                    <!-- Populated dynamically with verbatim text extracted from image -->
-                                </div>
-
-                                <div id="pcAiAnalysisBox" class="pc-ai-box" style="display: none;">
-                                    <!-- Populated dynamically with AI analysis & recommendation -->
+                        <!-- Top Row: Document Upload & Live Preview -->
+                        <div class="pc-scan-top-row">
+                            <div id="pcDropZone" class="pc-dropzone">
+                                <div class="pc-dropzone-icon">📄</div>
+                                <div class="pc-dropzone-title">اسحب صورة الشكوى أو ملف PDF هنا</div>
+                                <div class="pc-dropzone-sub">يدعم JPG, PNG, WEBP, PDF (حتى 10MB) — أو الصق الصورة مباشرة عبر Ctrl+V (تدوير تلقائي للصور المائلة والمعكوسة)</div>
+                                <div class="pc-dropzone-sub" style="color: var(--accent-primary); margin-top: 0.2rem;">💡 لأدق استخراج للخط اليدوي: صوّر الورقة بشكل قريب بإضاءة واضحة</div>
+                                <input type="file" id="pcScanFileInput"
+                                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                                    style="display:none;">
+                                <input type="file" id="pcCameraFileInput"
+                                    accept="image/*" capture="environment"
+                                    style="display:none;">
+                                <div class="pc-scan-actions">
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('pcScanFileInput').click()">
+                                        📁 اختيار ملف من الجهاز
+                                    </button>
+                                    <button type="button" id="pcCameraBtn" class="btn btn-outline btn-sm">
+                                        📸 التقاط بالكاميرا
+                                    </button>
+                                    <button type="button" id="pcRotateScanBtn" class="btn btn-outline btn-sm" style="display: none;" title="تدوير الصورة المختارة 90 درجة يدوياً">
+                                        🔄 تدوير 90°
+                                    </button>
+                                    <button type="button" id="pcScanAnalyzeBtn" class="btn btn-primary btn-sm">
+                                        🤖 قراءة وتحليل بالذكاء الاصطناعي
+                                    </button>
+                                    <button type="button" id="pcResetIntakeBtn" class="btn btn-ghost btn-sm">
+                                        🧹 مسح النموذج
+                                    </button>
                                 </div>
                             </div>
 
-                            <!-- Right/End Pane: Extracted Complaint Form -->
-                            <form id="formPoliceComplaintIntake" class="pc-intake-form">
-                                <input type="hidden" id="pcEditingComplaintId" value="">
-                                <div id="pcSourceLegend" class="pc-source-legend" style="display: none;">
-                                    <span>دليل الألوان:</span>
-                                    <span class="pc-source-pill pc-source-pill-ocr">📄 مستخرج من الصورة (OCR)</span>
-                                    <span class="pc-source-pill pc-source-pill-ai">🤖 تحليل / مقترح بالذكاء الاصطناعي</span>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="pcPaperDate">تاريخ الشكوى الورقي</label>
-                                        <input type="date" id="pcPaperDate" class="form-control">
+                            <div id="pcScanPreviewArea" class="pc-scan-preview-area">
+                                <div class="pc-preview-empty">لم يتم اختيار وثيقة ممسوحة بعد — ستظهر المعاينة هنا</div>
+                            </div>
+                        </div>
+
+                        <form id="formPoliceComplaintIntake" class="pc-intake-form">
+                            <input type="hidden" id="pcEditingComplaintId" value="">
+
+                            <!-- Two Side-by-Side Sections: (1) Extracted from Image (2) AI Analysis & Recommendations -->
+                            <div class="pc-two-sections-grid">
+                                <!-- Section 1: Extracted from Image (OCR) + Respondent Nearest Station -->
+                                <section class="pc-panel-section pc-panel-extracted" aria-label="المستخرج من الصورة">
+                                    <div class="pc-panel-header">
+                                        <h4>📄 القسم الأول: المستخرج من الصورة (OCR)</h4>
+                                        <span class="pc-source-pill pc-source-pill-ocr">نقل وتفريغ من الوثيقة</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="pcComplaintNumber">رقم الشكوى (اختياري — يُولّد تلقائياً)</label>
-                                        <input type="text" id="pcComplaintNumber" class="form-control" placeholder="مثال: SHK-2026-0001">
+
+                                    <div id="pcSourceLegend" class="pc-source-legend" style="display: none;">
+                                        <span>دليل الألوان:</span>
+                                        <span class="pc-source-pill pc-source-pill-ocr">📄 مستخرج من الصورة (OCR)</span>
+                                        <span class="pc-source-pill pc-source-pill-ai">🤖 تحليل / مقترح الذكاء الاصطناعي</span>
                                     </div>
-                                </div>
 
-                                <div class="form-group">
-                                    <label for="pcSubject">موضوع الشكوى *</label>
-                                    <input type="text" id="pcSubject" class="form-control" required
-                                        placeholder="أدخل موضوع الشكوى الرئيسي...">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="pcSummary">موجز الشكوى ووقائعها</label>
-                                    <textarea id="pcSummary" class="form-control" rows="3"
-                                        placeholder="ملخص الوقائع المستخرج من الوثيقة أو المدخل يدوياً..."></textarea>
-                                </div>
-
-                                <!-- Complainants (الشاكون) -->
-                                <div class="pc-parties-section">
-                                    <div class="pc-parties-header">
-                                        <span class="pc-parties-title">👥 بيانات المشتكين</span>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="addComplaintPartyRow('شاكي')">
-                                            ➕ إضافة مشتكٍ
-                                        </button>
+                                    <div id="pcOcrExtractedBox" class="pc-ocr-box" style="display: none;">
+                                        <!-- Populated dynamically with verbatim text extracted from image -->
                                     </div>
-                                    <div id="pcComplainantsList" class="pc-parties-list"></div>
-                                </div>
 
-                                <!-- Respondents (المشتكى عليهم) -->
-                                <div class="pc-parties-section">
-                                    <div class="pc-parties-header">
-                                        <span class="pc-parties-title">⚖️ بيانات المشتكى عليهم</span>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="addComplaintPartyRow('مشتكى_عليه')">
-                                            ➕ إضافة مشتكى عليه
-                                        </button>
-                                    </div>
-                                    <div id="pcRespondentsList" class="pc-parties-list"></div>
-                                </div>
-
-                                <!-- Formal Checkboxes -->
-                                <div class="pc-checkboxes-row">
-                                    <label class="pc-check-item" for="pcHasSignature">
-                                        <input type="checkbox" id="pcHasSignature">
-                                        <span>✍️ الشكوى تحمل توقيع المشتكي</span>
-                                    </label>
-                                    <label class="pc-check-item" for="pcNoPendingLawsuit">
-                                        <input type="checkbox" id="pcNoPendingLawsuit">
-                                        <span>📜 لا توجد قضية منظورة أمام المحاكم</span>
-                                    </label>
-                                </div>
-
-                                <!-- Nearest Station Preview Box -->
-                                <div id="pcStationMatchBox" class="pc-station-match-box">
-                                    <div class="pc-station-match-header">
-                                        <span>📍 أقرب مركز أمني (تحديد تلقائي لعنوان المشتكى عليه)</span>
-                                        <div class="pc-station-match-actions">
-                                            <button type="button" class="btn btn-outline btn-sm" onclick="rematchComplaintStation()">
-                                                🔄 تحديث أقرب مركز
-                                            </button>
-                                            <button type="button" class="btn btn-ghost btn-sm" onclick="openStationInFinder()">
-                                                🗺️ عرض في دليل المراكز
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="form-row">
-                                        <div class="form-group mb-0">
-                                            <label for="pcNearestStation">المركز الأمني الأقرب</label>
-                                            <input type="text" id="pcNearestStation" class="form-control" list="pcStationsDatalist" placeholder="يُحدد تلقائياً أو أدخله يدوياً...">
-                                        </div>
-                                        <div class="form-group mb-0">
-                                            <label for="pcPoliceDirectorate">مديرية الشرطة</label>
-                                            <input type="text" id="pcPoliceDirectorate" class="form-control" placeholder="مديرية الشرطة المختصة">
-                                        </div>
-                                        <div class="form-group mb-0">
-                                            <label for="pcLiwaName">اللواء / المنطقة</label>
-                                            <input type="text" id="pcLiwaName" class="form-control" placeholder="اللواء">
-                                        </div>
-                                    </div>
-                                    <input type="hidden" id="pcStationLat" value="">
-                                    <input type="hidden" id="pcStationLon" value="">
-                                </div>
-
-                                <!-- Officer Initial Action & Notes Box -->
-                                <div id="pcIntakeOfficerBox" class="pc-officer-intake-box">
-                                    <div class="pc-officer-intake-title">👮 نظر الضابط الأولي وإسناد الشكوى</div>
                                     <div class="form-row">
                                         <div class="form-group">
-                                            <label for="pcIntakeOfficerAction">الإجراء الأولي للضابط (اختياري)</label>
+                                            <label for="pcPaperDate">تاريخ الشكوى الورقي</label>
+                                            <input type="date" id="pcPaperDate" class="form-control">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="pcComplaintNumber">رقم الشكوى (اختياري — يُولّد تلقائياً)</label>
+                                            <input type="text" id="pcComplaintNumber" class="form-control" placeholder="مثال: SHK-2026-0001">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="pcSubject">موضوع الشكوى *</label>
+                                        <input type="text" id="pcSubject" class="form-control" required
+                                            placeholder="أدخل موضوع الشكوى الرئيسي...">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="pcSummary">موجز الشكوى ووقائعها</label>
+                                        <textarea id="pcSummary" class="form-control" rows="3"
+                                            placeholder="ملخص الوقائع المستخرج من الوثيقة أو المدخل يدوياً..."></textarea>
+                                    </div>
+
+                                    <!-- Complainants (الشاكون) -->
+                                    <div class="pc-parties-section">
+                                        <div class="pc-parties-header">
+                                            <span class="pc-parties-title">👥 بيانات المشتكين</span>
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="addComplaintPartyRow('شاكي')">
+                                                ➕ إضافة مشتكٍ
+                                            </button>
+                                        </div>
+                                        <div id="pcComplainantsList" class="pc-parties-list"></div>
+                                    </div>
+
+                                    <!-- Respondents (المشتكى عليهم) -->
+                                    <div class="pc-parties-section">
+                                        <div class="pc-parties-header">
+                                            <span class="pc-parties-title">⚖️ بيانات المشتكى عليهم</span>
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="addComplaintPartyRow('مشتكى_عليه')">
+                                                ➕ إضافة مشتكى عليه
+                                            </button>
+                                        </div>
+                                        <div id="pcRespondentsList" class="pc-parties-list"></div>
+                                    </div>
+
+                                    <!-- Formal Checkboxes -->
+                                    <div class="pc-checkboxes-row">
+                                        <label class="pc-check-item" for="pcHasSignature">
+                                            <input type="checkbox" id="pcHasSignature">
+                                            <span>✍️ الشكوى تحمل توقيع المشتكي</span>
+                                        </label>
+                                        <label class="pc-check-item" for="pcNoPendingLawsuit">
+                                            <input type="checkbox" id="pcNoPendingLawsuit">
+                                            <span>📜 لا توجد قضية منظورة أمام المحاكم</span>
+                                        </label>
+                                    </div>
+
+                                    <!-- Nearest Station Preview Box -->
+                                    <div id="pcStationMatchBox" class="pc-station-match-box">
+                                        <div class="pc-station-match-header">
+                                            <span>📍 أقرب مركز أمني للمشتكى عليه (تحديد تلقائي حسب العنوان)</span>
+                                            <div class="pc-station-match-actions">
+                                                <button type="button" class="btn btn-outline btn-sm" onclick="rematchComplaintStation()">
+                                                    🔄 تحديث أقرب مركز
+                                                </button>
+                                                <button type="button" class="btn btn-ghost btn-sm" onclick="openStationInFinder()">
+                                                    🗺️ عرض في دليل المراكز
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group mb-0">
+                                                <label for="pcNearestStation">المركز الأمني الأقرب</label>
+                                                <input type="text" id="pcNearestStation" class="form-control" list="pcStationsDatalist" placeholder="يُحدد تلقائياً أو أدخله يدوياً...">
+                                            </div>
+                                            <div class="form-group mb-0">
+                                                <label for="pcPoliceDirectorate">مديرية الشرطة</label>
+                                                <input type="text" id="pcPoliceDirectorate" class="form-control" placeholder="مديرية الشرطة المختصة">
+                                            </div>
+                                            <div class="form-group mb-0">
+                                                <label for="pcLiwaName">اللواء / المنطقة</label>
+                                                <input type="text" id="pcLiwaName" class="form-control" placeholder="اللواء">
+                                            </div>
+                                        </div>
+                                        <input type="hidden" id="pcStationLat" value="">
+                                        <input type="hidden" id="pcStationLon" value="">
+                                    </div>
+                                </section>
+
+                                <!-- Section 2: AI Analysis, Competent Authority Jurisdiction & Recommendations -->
+                                <section class="pc-panel-section pc-panel-ai" aria-label="تحليل الذكاء الاصطناعي والتوصيات">
+                                    <div class="pc-panel-header">
+                                        <h4>🤖 القسم الثاني: تحليل الذكاء الاصطناعي والاختصاص والتوصيات</h4>
+                                        <span class="pc-source-pill pc-source-pill-ai">استنتاج قانوني وإداري</span>
+                                    </div>
+
+                                    <div id="pcAiAnalysisPlaceholder" class="pc-ai-placeholder">
+                                        <div style="font-size: 2rem; margin-bottom: 0.4rem;">⚖️🤖</div>
+                                        <div style="font-weight: 800; color: #5B21B6; margin-bottom: 0.3rem;">في انتظار تحليل الوثيقة</div>
+                                        <div style="font-size: 0.84rem; color: var(--text-secondary); line-height: 1.65;">
+                                            عند رفع أو مسح صورة الشكوى سيظهر هنا تحليل الذكاء الاصطناعي متضمناً:
+                                            <br>• تحديد <strong>الجهة المختصة</strong> (الحاكم الإداري، مركز الشرطة، القضاء، حماية المستهلك، أمانة عمان، إلخ)
+                                            <br>• التكييف القانوني والإداري وسبب الاختصاص
+                                            <br>• التوصية العملية والإجراء المقترح
+                                        </div>
+                                    </div>
+
+                                    <div id="pcAiAnalysisBox" class="pc-ai-box" style="display: none; margin-top: 0;">
+                                        <!-- Populated dynamically with AI jurisdiction analysis & recommendation -->
+                                    </div>
+                                </section>
+                            </div>
+
+                            <!-- Section 3: Officer Notes & Action -->
+                            <section id="pcActionNotesSection" class="pc-panel-section pc-panel-action" aria-label="كتابة الملاحظات واتخاذ الإجراء">
+                                <div class="pc-panel-header">
+                                    <h4>👮 القسم الثالث: كتابة الملاحظات واتخاذ الإجراء</h4>
+                                    <span class="badge badge-blue">قرار وإجراء الضابط</span>
+                                </div>
+
+                                <div id="pcIntakeOfficerBox" class="pc-officer-intake-box" style="margin-top: 0;">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="pcIntakeOfficerAction">الإجراء المتخذ / الأولي للضابط</label>
                                             <select id="pcIntakeOfficerAction" class="form-control">
                                                 <option value="">— اختر الإجراء المقترح —</option>
                                                 <option value="توديع عن طريق مركز أمني">توديع عن طريق مركز أمني</option>
                                                 <option value="اتصال هاتفي">اتصال هاتفي</option>
                                                 <option value="توديع مغفور">توديع مغفور</option>
+                                                <option value="حفظ / توجيه للقضاء المختص">حفظ / توجيه للقضاء المختص</option>
                                                 <option value="مواجهة / تسوية ودية">مواجهة / تسوية ودية</option>
                                                 <option value="إعادة استكمال نواقص">إعادة استكمال نواقص</option>
                                             </select>
@@ -833,9 +869,9 @@
                                         </div>
                                     </div>
                                     <div class="form-group mb-0">
-                                        <label for="pcIntakeOfficerNotes">ملاحظات ومشروحات الضابط الأولية</label>
-                                        <textarea id="pcIntakeOfficerNotes" class="form-control" rows="2"
-                                            placeholder="أدخل ملاحظات الضابط أو تفاصيل الاستيفاء الأولي..."></textarea>
+                                        <label for="pcIntakeOfficerNotes">ملاحظات ومشروحات الضابط واتخاذ الإجراء</label>
+                                        <textarea id="pcIntakeOfficerNotes" class="form-control" rows="3"
+                                            placeholder="اكتب ملاحظاتك القانونية والإدارية والقرار أو الإجراء المطلوب اتخاذه..."></textarea>
                                     </div>
                                 </div>
 
@@ -847,8 +883,8 @@
                                         📤 حفظ وإرسال لرئيس القسم
                                     </button>
                                 </div>
-                            </form>
-                        </div>
+                            </section>
+                        </form>
                     </div>
                 </div>
 
@@ -1516,8 +1552,8 @@
 
     <!-- Leaflet JS & MAT Application Core Logic -->
     <script src="/leaflet.js"></script>
-    <script src="/complaints/js/police_complaints.js?v=1.46.12"></script>
-    <script src="/complaints/js/app.js?v=1.46.12"></script>
+    <script src="/complaints/js/police_complaints.js?v=1.46.13"></script>
+    <script src="/complaints/js/app.js?v=1.46.13"></script>
     
     <script>
       // Seamless FCM Push Permission & Token Sync

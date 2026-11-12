@@ -791,6 +791,70 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         self.assertIn("تسجيل شكوى جديدة", html_txt)
         self.assertNotIn("مسح شكوى جديدة", html_txt)
 
+    def test_08_scan_extract_replace_scan_id_and_rotation_field(self):
+        off_op, off_jar = self._login("ehab")
+        png_b64 = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")
+
+        fake_sideways = {
+            "status": "ok",
+            "provider": "openai",
+            "model": "qwen/qwen3.8-27b",
+            "detected_rotation_cw": 270,
+            "extracted": {"subject": "اختبار مائل", "complainants": [], "respondents": []},
+            "analysis": {"ai_confidence": 0.65, "ai_recommended_action": "توديع عن طريق مركز أمني"},
+            "raw_text": "{}",
+            "message": "ok",
+        }
+        fake_upright = {
+            "status": "ok",
+            "provider": "openai",
+            "model": "qwen/qwen3.8-27b",
+            "detected_rotation_cw": 0,
+            "extracted": {"subject": "اختبار معتدل", "complainants": [], "respondents": []},
+            "analysis": {"ai_confidence": 0.95, "ai_recommended_action": "توديع عن طريق مركز أمني"},
+            "raw_text": "{}",
+            "message": "ok",
+        }
+
+        with mock.patch.object(
+            mat_llm_engine,
+            "extract_and_analyze_complaint",
+            side_effect=[fake_sideways, fake_upright],
+        ):
+            st, _, raw1 = self._req(
+                off_op,
+                off_jar,
+                "POST",
+                "/api/v1/mat/police-complaints/scan-extract",
+                {"filename": "sideways.png", "file_base64": png_b64, "page_order": 1},
+            )
+            self.assertEqual(st, 200)
+            res1 = json.loads(raw1.decode("utf-8"))
+            scan1_id = res1["scan_id"]
+            self.assertEqual(res1["detected_rotation_cw"], 270)
+            self.assertEqual(self._req(off_op, off_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan1_id}")[0], 200)
+
+            st, _, raw2 = self._req(
+                off_op,
+                off_jar,
+                "POST",
+                "/api/v1/mat/police-complaints/scan-extract",
+                {
+                    "filename": "upright.png",
+                    "file_base64": png_b64,
+                    "page_order": 1,
+                    "replace_scan_id": scan1_id,
+                },
+            )
+            self.assertEqual(st, 200)
+            res2 = json.loads(raw2.decode("utf-8"))
+            scan2_id = res2["scan_id"]
+            self.assertEqual(res2["detected_rotation_cw"], 0)
+            self.assertNotEqual(scan2_id, scan1_id)
+            # Old replaced scan must be removed from DB & disk, new upright scan remains accessible
+            self.assertEqual(self._req(off_op, off_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan1_id}")[0], 404)
+            self.assertEqual(self._req(off_op, off_jar, "GET", f"/api/v1/mat/police-complaints/scans/{scan2_id}")[0], 200)
+
 
 if __name__ == "__main__":
     unittest.main()

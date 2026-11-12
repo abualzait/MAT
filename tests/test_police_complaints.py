@@ -1006,6 +1006,36 @@ class TestLlmEngine(unittest.TestCase):
         self.assertEqual(sent_groq["max_tokens"], 900)
         self.assertEqual(res_blurry["status"], "manual_fallback")
         self.assertIn("تعذر استخراج نص واضح", res_blurry["message"])
+        self.assertEqual(res_blurry["detected_rotation_cw"], 0)
+
+    def test_detected_rotation_cw_preserved_even_on_garbled_manual_fallback(self):
+        garbled_inverted = {
+            "detected_rotation_cw": 180,
+            "raw_transcription": "首都 1111111111",
+            "subject": "اختبار",
+            "summary": "نص مشوش",
+            "complainants": [{"name": "دينا", "national_id": "1111111111"}],
+            "ai_confidence": 0.4,
+        }
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps(
+            {"model": "qwen/qwen3.8-27b", "choices": [{"message": {"content": json.dumps(garbled_inverted, ensure_ascii=False)}}]}
+        ).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        settings = {
+            "provider": "openai",
+            "model_name": "qwen/qwen3.8-27b",
+            "api_base_url": "https://api.groq.com/openai/v1",
+            "api_key": "gsk_FakeGroqKey1234567890ABCD",
+            "is_enabled": 1,
+        }
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            res = mat_llm_engine.extract_and_analyze_complaint(b"\x89PNG\r\n\x1a\nfake", "image/png", settings)
+
+        self.assertEqual(res["status"], "manual_fallback")
+        self.assertEqual(res["detected_rotation_cw"], 180)
+        self.assertEqual(mat_llm_engine._normalize_rotation_cw(-90), 270)
+        self.assertEqual(mat_llm_engine._normalize_rotation_cw("45"), 0)
 
 
 class TestComplaintsUtilities(unittest.TestCase):

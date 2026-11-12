@@ -42,6 +42,7 @@ COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني ومحرر وثا�
 المطلوب منك تفريغ محتويات الشكوى من الصورة بدقة حرفية متناهية وإجراء التحليل الإداري والقانوني للشكوى وتحديد مدى الحاجة لمتابعة المراكز الأمنية.
 
 تعليمات الدقة الصارمة (إلزامية):
+- افحص اتجاه الورقة أولاً وضع القيمة الصحيحة في حقل `detected_rotation_cw` (أحد الأرقام الحصرية: `0` أو `90` أو `180` أو `270`): `0` إذا كانت الترويسة أعلى الصورة والنص معتدل، `90` إذا كانت الترويسة على اليسار وتحتاج الصورة تدوير 90° مع عقارب الساعة لتعتدل، `180` إذا كانت الورقة مقلوبة رأساً على عقب وتحتاج تدوير 180°، `270` إذا كانت الترويسة على اليمين وتحتاج تدوير 270° مع عقارب الساعة (90° عكس العقارب).
 - ابدأ بتعبئة حقل `raw_transcription` بنسخ كل سطر مقروء في الورقة من الأعلى إلى الأسفل باللغة العربية السليمة حرفياً قبل تعبئة باقي الحقول.
 - اقرأ الجداول بعناية من اليمين إلى اليسار: جدول (بيانات المشتكين / المدعين) يذهب إلى `complainants`، وجدول (بيانات المشتكى عليهم) يذهب إلى `respondents`.
 - انقل الأسماء والرقم الوطني (غالباً 10 أرقام) ورقم الهاتف (يبدأ غالباً بـ 07) والعناوين والتاريخ (`paper_date` أعلى الورقة) ونص الشكوى (`summary`) حرفاً بحرف ورقماً برقم كما هي في الصورة تماماً.
@@ -52,6 +53,7 @@ COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني ومحرر وثا�
 
 قم بإرجاع النتيجة حصراً بصيغة JSON صالحة ونظيفة وبدون أي مقدمات أو شروحات خارج كائن الـ JSON بالهيكل التالي:
 {
+  "detected_rotation_cw": 0,
   "raw_transcription": "التفريغ الحرفي الكامل لجميع أسطر الورقة من الأعلى للأسفل باللغة العربية",
   "paper_date": "تاريخ تقديم الشكوى المكتوب في الورقة إن وجد أو فارغ",
   "complainants": [
@@ -860,6 +862,18 @@ _ARABIC_LATIN_SPLICE_RE = re.compile(r"[\u0600-\u06FF][A-Za-z]|[A-Za-z][\u0600-\
 _REPEATED_DUMMY_DIGITS_RE = re.compile(r"(\d)\1{5,}")
 
 
+def _normalize_rotation_cw(raw_val: Any) -> int:
+    """Normalize LLM-detected clockwise rotation degrees to one of 0, 90, 180, 270."""
+    try:
+        deg = int(float(raw_val))
+    except (ValueError, TypeError):
+        return 0
+    deg = deg % 360
+    if deg in (0, 90, 180, 270):
+        return deg
+    return 0
+
+
 def _detect_unreliable_extraction(
     extracted: Dict[str, Any], analysis: Dict[str, Any]
 ) -> str:
@@ -943,6 +957,7 @@ def _extract_with_single_provider(
                     "status": "manual_fallback",
                     "provider": provider,
                     "model": effective_model,
+                    "detected_rotation_cw": 0,
                     "extracted": {},
                     "analysis": {},
                     "raw_text": raw_text,
@@ -951,7 +966,9 @@ def _extract_with_single_provider(
                 True,
             )
 
-        if provider == "openai" and _has_foreign_script_noise(parsed):
+        detected_rotation_cw = _normalize_rotation_cw(parsed.get("detected_rotation_cw"))
+
+        if provider == "openai" and detected_rotation_cw == 0 and _has_foreign_script_noise(parsed):
             repaired_parsed, repaired_raw = _repair_mixed_script_ocr_json(parsed, settings)
             if repaired_raw:
                 parsed = repaired_parsed
@@ -966,6 +983,7 @@ def _extract_with_single_provider(
                     "status": "manual_fallback",
                     "provider": provider,
                     "model": effective_model,
+                    "detected_rotation_cw": detected_rotation_cw,
                     "extracted": {},
                     "analysis": {},
                     "raw_text": raw_text,
@@ -979,6 +997,7 @@ def _extract_with_single_provider(
                 "status": "ok",
                 "provider": provider,
                 "model": effective_model,
+                "detected_rotation_cw": detected_rotation_cw,
                 "extracted": extracted,
                 "analysis": analysis,
                 "raw_text": raw_text,

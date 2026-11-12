@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.11${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.12${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -1083,6 +1083,49 @@
         if (legend && hasMarked) legend.style.display = 'flex';
     }
 
+    async function transformImageFile(file, options = {}) {
+        const degrees = ((Number(options.rotateCw || 0) % 360) + 360) % 360;
+        const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        const swapAxes = degrees === 90 || degrees === 270;
+        const outW = swapAxes ? bitmap.height : bitmap.width;
+        const outH = swapAxes ? bitmap.width : bitmap.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            bitmap.close?.();
+            throw new Error('تعذر تدوير الصورة في المتصفح');
+        }
+        ctx.translate(outW / 2, outH / 2);
+        ctx.rotate((degrees * Math.PI) / 180);
+        ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+        bitmap.close?.();
+
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+        if (!blob) {
+            throw new Error('تعذر حفظ الصورة بعد التدوير');
+        }
+        const cleanName = (normalizeScanFilename(file).replace(/\.[^.]+$/, '') || 'rotated_scan') + '.jpg';
+        return {
+            file: new File([blob], cleanName, { type: 'image/jpeg', lastModified: Date.now() }),
+            width: outW,
+            height: outH
+        };
+    }
+
+    async function getImageDimensions(file) {
+        if (!file || typeof createImageBitmap !== 'function') return null;
+        try {
+            const probe = await createImageBitmap(file, { imageOrientation: 'from-image' });
+            const dims = { width: probe.width || 0, height: probe.height || 0 };
+            probe.close?.();
+            return dims;
+        } catch (_err) {
+            return null;
+        }
+    }
+
     async function rotatePendingScanFile(degrees = 90) {
         const file = state.pendingScanFile;
         if (!file) {
@@ -1101,32 +1144,7 @@
         }
 
         try {
-            const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-            const rad = ((degrees % 360) * Math.PI) / 180;
-            const swapAxes = Math.abs(degrees % 180) === 90;
-            const outW = swapAxes ? bitmap.height : bitmap.width;
-            const outH = swapAxes ? bitmap.width : bitmap.height;
-            const canvas = document.createElement('canvas');
-            canvas.width = outW;
-            canvas.height = outH;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                bitmap.close?.();
-                pcToast('تعذر تدوير الصورة في المتصفح', true);
-                return;
-            }
-            ctx.translate(outW / 2, outH / 2);
-            ctx.rotate(rad);
-            ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
-            bitmap.close?.();
-
-            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
-            if (!blob) {
-                pcToast('تعذر حفظ الصورة بعد التدوير', true);
-                return;
-            }
-            const cleanName = (normalizeScanFilename(file).replace(/\.[^.]+$/, '') || 'rotated_scan') + '.jpg';
-            const rotatedFile = new File([blob], cleanName, { type: 'image/jpeg', lastModified: Date.now() });
+            const { file: rotatedFile } = await transformImageFile(file, { rotateCw: degrees });
             state.pendingScanFile = rotatedFile;
             state.uploadedScans = [];
             state.uploadedScanIds = [];
@@ -1135,8 +1153,8 @@
             renderIntakePreview(state.pendingLocalPreviewUrl, 'image/jpeg', rotatedFile.name);
             setExtractionStatus('جاهز لإعادة التحليل بعد التدوير', 'badge-blue');
             pcToast('تم تدوير الصورة 90° — اضغط «قراءة وتحليل» لإعادة الاستخراج');
-        } catch (_err) {
-            pcToast('تعذر تدوير الصورة المختارة', true);
+        } catch (err) {
+            pcToast((err && err.message) || 'تعذر تدوير الصورة المختارة', true);
         }
     }
 
@@ -1147,36 +1165,34 @@
             return;
         }
 
-        state.pendingScanFile = file;
-        revokeLocalPreviewUrl();
-
-        const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
-            || String(file.name || '').toLowerCase().endsWith('.pdf');
+        let activeFile = file;
+        const isPdf = String(activeFile.type || '').toLowerCase() === 'application/pdf'
+            || String(activeFile.name || '').toLowerCase().endsWith('.pdf');
         const rotateBtn = $('pcRotateScanBtn');
         if (rotateBtn) rotateBtn.style.display = isPdf ? 'none' : 'inline-flex';
 
-        state.pendingLocalPreviewUrl = URL.createObjectURL(file);
-
-        renderIntakePreview(state.pendingLocalPreviewUrl, isPdf ? 'application/pdf' : file.type, file.name);
-        setExtractionStatus('جاري تجهيز الوثيقة...', 'badge-blue');
-
-        if (!isPdf && options.autoExtract !== false && typeof createImageBitmap === 'function') {
+        // Bake EXIF camera rotation tags (3/6/8) directly into upright image pixels immediately on pick
+        if (!isPdf && typeof createImageBitmap === 'function') {
             try {
-                const probe = await createImageBitmap(file, { imageOrientation: 'from-image' });
-                const isLandscape = probe.width > probe.height * 1.15;
-                probe.close?.();
-                if (isLandscape) {
-                    setExtractionStatus('📐 الصورة أفقية — استخدم «🔄 تدوير 90°» لاستقامتها ثم اضغط «قراءة وتحليل»', 'badge-yellow');
-                    pcToast('تظهر الصورة بالوضع الأفقي — دوّرها عمودياً عبر «🔄 تدوير 90°» قبل القراءة بالذكاء الاصطناعي');
-                    return;
+                const exifOrient = await getJpegExifOrientation(activeFile);
+                if (exifOrient > 1) {
+                    const transformed = await transformImageFile(activeFile, { rotateCw: 0 });
+                    activeFile = transformed.file;
                 }
             } catch (_err) {
-                // Fall through to auto-extract when orientation probe is unavailable
+                // Keep original file if browser fails EXIF canvas decode
             }
         }
 
+        state.pendingScanFile = activeFile;
+        revokeLocalPreviewUrl();
+        state.pendingLocalPreviewUrl = URL.createObjectURL(activeFile);
+
+        renderIntakePreview(state.pendingLocalPreviewUrl, isPdf ? 'application/pdf' : activeFile.type, activeFile.name);
+        setExtractionStatus('جاري تجهيز الوثيقة...', 'badge-blue');
+
         if (options.autoExtract !== false) {
-            await runScanExtraction();
+            await runScanExtraction({ autoOrientRemaining: 1 });
         }
     }
 
@@ -1264,7 +1280,7 @@
         scanAnimationTimer = setInterval(updateProgress, 1000);
     }
 
-    async function runScanExtraction() {
+    async function runScanExtraction(options = {}) {
         if (state.isScanning) return;
         const file = state.pendingScanFile;
         if (!file) {
@@ -1278,6 +1294,11 @@
             return;
         }
 
+        const autoOrientRemaining = typeof options.autoOrientRemaining === 'number' ? options.autoOrientRemaining : 1;
+        const replaceScanId = options.replaceScanId || null;
+        const rotatedByCw = Number(options.rotatedByCw || 0);
+        let retryingRotated = false;
+
         state.isScanning = true;
 
         const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
@@ -1289,11 +1310,19 @@
             ocrBox.style.display = 'none';
             ocrBox.replaceChildren();
         }
-        setExtractionStatus('جاري قراءة الخط اليدوي وتحليل الشكوى بالذكاء الاصطناعي...', 'badge-purple');
+        setExtractionStatus(
+            rotatedByCw
+                ? `🔄 تم تدوير الصورة تلقائياً (${rotatedByCw}°) — جاري إعادة القراءة بدقة...`
+                : 'جاري قراءة الخط اليدوي وتحليل الشكوى بالذكاء الاصطناعي...',
+            'badge-purple'
+        );
         const aiBox = $('pcAiAnalysisBox');
-        startScanLoadingAnimation();
+        if (!rotatedByCw) startScanLoadingAnimation();
 
         try {
+            const dims = !isPdf ? await getImageDimensions(file) : null;
+            const isLandscape = Boolean(dims && dims.width > dims.height * 1.15);
+
             const dataUrl = await prepareScanUploadDataUrl(file);
             const editingId = String($('pcEditingComplaintId')?.value || '').trim();
             const fileSig = `${file.name}:${file.size}:${file.lastModified || 0}`;
@@ -1308,6 +1337,7 @@
                 page_order: pageOrder
             };
             if (editingId) payload.complaint_id = Number(editingId);
+            if (replaceScanId) payload.replace_scan_id = Number(replaceScanId);
 
             const res = await fetch('/api/v1/mat/police-complaints/scan-extract', {
                 method: 'POST',
@@ -1332,6 +1362,38 @@
                 return;
             }
 
+            // Auto-rotate sideways or upside-down document images when detected
+            let targetRotateCw = [90, 180, 270].includes(Number(data.detected_rotation_cw))
+                ? Number(data.detected_rotation_cw)
+                : 0;
+            const lowConfidence = Number((data.analysis && data.analysis.ai_confidence) || 0) < 0.75;
+            if (targetRotateCw === 0 && !isPdf && isLandscape && (data.status !== 'ok' || lowConfidence)) {
+                targetRotateCw = 270;
+            }
+
+            if (targetRotateCw > 0 && !isPdf && autoOrientRemaining > 0 && typeof createImageBitmap === 'function') {
+                try {
+                    const { file: uprightFile } = await transformImageFile(file, { rotateCw: targetRotateCw });
+                    state.pendingScanFile = uprightFile;
+                    state.uploadedScans = state.uploadedScans.filter((s) => s.id !== data.scan_id && s.id !== replaceScanId);
+                    state.uploadedScanIds = state.uploadedScans.map((s) => s.id);
+                    revokeLocalPreviewUrl();
+                    state.pendingLocalPreviewUrl = URL.createObjectURL(uprightFile);
+                    renderIntakePreview(state.pendingLocalPreviewUrl, 'image/jpeg', uprightFile.name);
+
+                    retryingRotated = true;
+                    state.isScanning = false;
+                    await runScanExtraction({
+                        autoOrientRemaining: autoOrientRemaining - 1,
+                        replaceScanId: data.scan_id || replaceScanId || null,
+                        rotatedByCw: targetRotateCw
+                    });
+                    return;
+                } catch (_rotErr) {
+                    // Fall back to displaying the initial scan result if canvas rotation fails
+                }
+            }
+
             if (data.scan_id) {
                 const scanObj = data.scan || {
                     id: data.scan_id,
@@ -1342,7 +1404,9 @@
                 scanObj.fileSig = fileSig;
                 scanObj.page_order = pageOrder;
 
-                const existingIdx = state.uploadedScans.findIndex((s) => s.fileSig === fileSig || s.id === scanObj.id);
+                const existingIdx = state.uploadedScans.findIndex(
+                    (s) => s.fileSig === fileSig || s.id === scanObj.id || (replaceScanId && s.id === replaceScanId)
+                );
                 if (existingIdx !== -1) {
                     state.uploadedScans[existingIdx] = scanObj;
                     state.intakeActiveScanIndex = existingIdx;
@@ -1360,22 +1424,34 @@
 
             if (data.status === 'ok') {
                 applyExtractedComplaintToForm(data);
-                setExtractionStatus('✅ تم استخراج البيانات وتحليل الشكوى', 'badge-green');
-                pcToast('تم قراءة الشكوى وتفريغ البيانات بالذكاء الاصطناعي بنجاح');
+                if (rotatedByCw) {
+                    setExtractionStatus(`✅ تم تدوير الصورة تلقائياً (${rotatedByCw}°) وتحليل الشكوى`, 'badge-green');
+                    pcToast(`🔄 تم تصحيح اتجاه الصورة تلقائياً (${rotatedByCw}°) وقراءة الشكوى بنجاح`);
+                } else {
+                    setExtractionStatus('✅ تم استخراج البيانات وتحليل الشكوى', 'badge-green');
+                    pcToast('تم قراءة الشكوى وتفريغ البيانات بالذكاء الاصطناعي بنجاح');
+                }
             } else {
                 if (data.station_match && data.station_match.matched) {
                     applyStationMatchToIntakeForm(data.station_match);
                 }
-                setExtractionStatus('✍️ تم حفظ الوثيقة — استكمال يدوي', 'badge-yellow');
-                pcToast('تم حفظ الوثيقة الممسوحة — يرجى استكمال البيانات يدوياً');
+                if (rotatedByCw) {
+                    setExtractionStatus(`✍️ تم تدوير الصورة (${rotatedByCw}°) وحفظها — استكمال يدوي`, 'badge-yellow');
+                    pcToast(`🔄 تم تصحيح اتجاه الصورة (${rotatedByCw}°) — يرجى استكمال البيانات يدوياً`);
+                } else {
+                    setExtractionStatus('✍️ تم حفظ الوثيقة — استكمال يدوي', 'badge-yellow');
+                    pcToast('تم حفظ الوثيقة الممسوحة — يرجى استكمال البيانات يدوياً');
+                }
             }
         } catch (errObj) {
             setExtractionStatus('خطأ أثناء معالجة الوثيقة', 'badge-red');
             if (aiBox) aiBox.style.display = 'none';
             pcToast((errObj && errObj.message) || 'حدث خطأ أثناء معالجة الملف', true);
         } finally {
-            state.isScanning = false;
-            stopScanLoadingAnimation();
+            if (!retryingRotated) {
+                state.isScanning = false;
+                stopScanLoadingAnimation();
+            }
         }
     }
 

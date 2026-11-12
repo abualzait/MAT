@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.11) ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.12) ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -3553,6 +3553,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             filename = 'scan'
             complaint_id_raw = None
             page_order_raw = 1
+            replace_scan_id_raw = None
 
             for part in msg.iter_parts():
                 field_name = (part.get_param('name', header='content-disposition') or '').strip()
@@ -3569,10 +3570,12 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                     complaint_id_raw = payload_bytes.decode('utf-8', errors='replace').strip()
                 elif field_name == 'page_order':
                     page_order_raw = payload_bytes.decode('utf-8', errors='replace').strip() or 1
+                elif field_name == 'replace_scan_id':
+                    replace_scan_id_raw = payload_bytes.decode('utf-8', errors='replace').strip()
 
             if file_bytes is None:
                 raise ValueError('لم يتم العثور على ملف مرفق في الطلب')
-            return file_bytes, filename, complaint_id_raw, page_order_raw
+            return file_bytes, filename, complaint_id_raw, page_order_raw, replace_scan_id_raw
 
         # JSON base64 payload
         if not raw_body:
@@ -3601,7 +3604,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         except (binascii.Error, ValueError) as exc:
             raise ValueError('ترميز الملف base64 غير صالح') from exc
 
-        return file_bytes, filename, data.get('complaint_id'), data.get('page_order', 1)
+        return file_bytes, filename, data.get('complaint_id'), data.get('page_order', 1), data.get('replace_scan_id')
 
     def api_get_police_complaints(self):
         user = self.require_role('officer', 'admin', 'governor', 'caller')
@@ -3708,13 +3711,18 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         if not user:
             return
 
-        file_bytes, filename, complaint_id_raw, page_order_raw = self._extract_scan_upload_from_request()
+        file_bytes, filename, complaint_id_raw, page_order_raw, replace_scan_id_raw = self._extract_scan_upload_from_request()
         complaint_id = (
             mat_complaints_service._clean_opt_int(complaint_id_raw, 'complaint_id')
             if complaint_id_raw not in (None, '')
             else None
         )
         page_order = mat_complaints_service._clean_opt_int(page_order_raw, 'page_order') or 1
+        replace_scan_id = (
+            mat_complaints_service._clean_opt_int(replace_scan_id_raw, 'replace_scan_id')
+            if replace_scan_id_raw not in (None, '')
+            else None
+        )
 
         # Short DB read for complaint verification + LLM settings (do not hold SQLite connection across LLM HTTP call)
         conn = get_db()
@@ -3764,10 +3772,27 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
                     ),
                 )
                 scan_id = int(cur.lastrowid)
+                old_stored_filename = None
+                if replace_scan_id and replace_scan_id != scan_id:
+                    old_row = conn.execute(
+                        "SELECT id, complaint_id, stored_filename, uploaded_by_id FROM mat_complaint_scans WHERE id = ?",
+                        (replace_scan_id,),
+                    ).fetchone()
+                    if old_row and (old_row['uploaded_by_id'] == user['user_id'] or user['role'] == 'admin'):
+                        if old_row['complaint_id'] is None or old_row['complaint_id'] == complaint_id:
+                            old_stored_filename = old_row['stored_filename']
+                            conn.execute("DELETE FROM mat_complaint_scans WHERE id = ?", (replace_scan_id,))
                 log_activity(conn, user['user_id'], 'مسح ضوئي لشكوى', 'complaint_scan', scan_id, stored['original_filename'])
                 conn.commit()
             finally:
                 conn.close()
+            if old_stored_filename:
+                try:
+                    old_abs_path = mat_complaints_service.resolve_scan_path(old_stored_filename, _get_scans_dir())
+                    if os.path.isfile(old_abs_path):
+                        os.unlink(old_abs_path)
+                except (ValueError, OSError):
+                    pass
         except Exception:
             if stored and stored.get('abs_path') and os.path.exists(stored['abs_path']):
                 try:
@@ -3791,6 +3816,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             'status': llm_res.get('status', 'manual_fallback'),
             'provider': llm_res.get('provider', ''),
             'model': llm_res.get('model', ''),
+            'detected_rotation_cw': int(llm_res.get('detected_rotation_cw') or 0),
             'extracted': extracted,
             'analysis': llm_res.get('analysis') or {},
             'raw_text': llm_res.get('raw_text', ''),

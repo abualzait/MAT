@@ -55,6 +55,7 @@ All core API endpoints are prefixed with `/api/v1/mat/` (legacy `/api/...` paths
       "status": "ok | manual_fallback",
       "provider": "gemini | openai | ollama",
       "model": "...",
+      "detected_rotation_cw": 0,
       "extracted": { "raw_transcription": "...", "paper_date": "...", "complainants": [], "respondents": [], "subject": "...", "summary": "...", "has_signature": true, "no_pending_lawsuit_declared": true },
       "analysis": { "is_minor_police_complaint": true, "police_necessity_reason": "...", "ai_analysis": "...", "ai_solution_recommendation": "...", "ai_recommended_action": "...", "ai_confidence": 0.92 },
       "raw_text": "...",

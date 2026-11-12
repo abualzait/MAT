@@ -710,6 +710,87 @@ class TestPoliceComplaintsApi(unittest.TestCase):
         self.assertEqual(self._req(cal_op, cal_jar, "GET", f"/api/v1/mat/police-complaints/{cid2}")[0], 200)
         self.assertEqual(self._req(cal_op, cal_jar, "GET", "/api/v1/mat/police-complaints/scans/1")[0], 403)
 
+    def test_07_simple_dashboard_police_summary_permissions_and_actions(self):
+        off_op, off_jar = self._login("ehab")
+        adm_op, adm_jar = self._login("orwa")
+        gov_op, gov_jar = self._login("governor")
+        cal_op, cal_jar = self._login("raad")
+
+        # 1. Officer registers a draft complaint (action needed for officer, and forwarded to section head for admin)
+        st, _, raw = self._req(
+            off_op,
+            off_jar,
+            "POST",
+            "/api/v1/mat/police-complaints",
+            {
+                "subject": "شكوى اختبار لوحة التحكم",
+                "summary": "اختبار إحصائيات وإشعارات الشكاوى",
+                "submit_stage": "draft_scan",
+                "complainants": [{"name": "أحمد علي", "phone": "0791234567"}],
+            },
+        )
+        self.assertEqual(st, 201)
+        draft_id = json.loads(raw.decode("utf-8"))["id"]
+
+        st, _, raw = self._req(
+            off_op,
+            off_jar,
+            "POST",
+            "/api/v1/mat/police-complaints",
+            {
+                "subject": "شكوى بانتظار رئيس القسم",
+                "summary": "مرفوعة للرئيس",
+                "submit_stage": "pending_section_head",
+                "complainants": [{"name": "سالم حسن", "phone": "0781112233"}],
+            },
+        )
+        self.assertEqual(st, 201)
+        sec_id = json.loads(raw.decode("utf-8"))["id"]
+
+        # Officer dashboard: enabled=True, can_register=True, draft_id needs action
+        st, _, raw = self._req(off_op, off_jar, "GET", "/api/v1/mat/simple-dashboard?filter=today")
+        self.assertEqual(st, 200)
+        off_dash = json.loads(raw.decode("utf-8"))["police_complaints_summary"]
+        self.assertTrue(off_dash["enabled"])
+        self.assertTrue(off_dash["can_register"])
+        self.assertGreaterEqual(off_dash["action_required_count"], 1)
+        off_ids = {item["id"] for item in off_dash["action_items"]}
+        self.assertIn(draft_id, off_ids)
+        self.assertNotIn(sec_id, off_ids)
+
+        # Admin dashboard: enabled=True, can_register=True, sec_id needs action
+        st, _, raw = self._req(adm_op, adm_jar, "GET", "/api/v1/mat/simple-dashboard?filter=today")
+        self.assertEqual(st, 200)
+        adm_dash = json.loads(raw.decode("utf-8"))["police_complaints_summary"]
+        self.assertTrue(adm_dash["enabled"])
+        self.assertTrue(adm_dash["can_register"])
+        self.assertIn(sec_id, {item["id"] for item in adm_dash["action_items"]})
+
+        # Governor dashboard: enabled=True, can_register=False (no intake permission)
+        st, _, raw = self._req(gov_op, gov_jar, "GET", "/api/v1/mat/simple-dashboard?filter=today")
+        self.assertEqual(st, 200)
+        gov_dash = json.loads(raw.decode("utf-8"))["police_complaints_summary"]
+        self.assertTrue(gov_dash["enabled"])
+        self.assertFalse(gov_dash["can_register"])
+
+        # Caller (raad, no police_complaints tool) dashboard: strictly disabled & empty
+        st, _, raw = self._req(cal_op, cal_jar, "GET", "/api/v1/mat/simple-dashboard?filter=today")
+        self.assertEqual(st, 200)
+        cal_dash = json.loads(raw.decode("utf-8"))["police_complaints_summary"]
+        self.assertFalse(cal_dash["enabled"])
+        self.assertFalse(cal_dash["can_register"])
+        self.assertEqual(cal_dash["action_required_count"], 0)
+        self.assertEqual(cal_dash["action_items"], [])
+
+        # Verify UI page contains renamed button and dashboard elements
+        st, _, html_raw = self._req(off_op, off_jar, "GET", "/complaints/app.html")
+        self.assertEqual(st, 200)
+        html_txt = html_raw.decode("utf-8")
+        self.assertIn('id="dashboardPoliceComplaintsCard"', html_txt)
+        self.assertIn('id="dashboardRegisterComplaintBtn"', html_txt)
+        self.assertIn("تسجيل شكوى جديدة", html_txt)
+        self.assertNotIn("مسح شكوى جديدة", html_txt)
+
 
 if __name__ == "__main__":
     unittest.main()

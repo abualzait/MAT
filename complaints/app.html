@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
 
     <!-- Civic Horizon CSS Design System -->
-    <link rel="stylesheet" href="/complaints/css/design-system.css?v=28">
+    <link rel="stylesheet" href="/complaints/css/design-system.css?v=29">
     
     <!-- Leaflet CSS for unified map -->
     <link rel="stylesheet" href="/leaflet.css">
@@ -39,7 +39,7 @@
                     <h1 class="header-main-title">حقيبة الأدوات المساعدة</h1>
                     <p class="header-jurisdiction">
                         <span>محافظة العاصمة</span>
-                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.46.10</span>
+                        <span class="badge badge-purple" style="font-size:0.62rem; padding:1px 5px; border-radius:4px;">v1.46.11</span>
                     </p>
                 </div>
                 <button class="sidebar-close-btn" onclick="closeSidebarDrawer()" title="إغلاق القائمة" aria-label="إغلاق القائمة">
@@ -141,6 +141,7 @@
                             <option value="month">إحصائيات هذا الشهر</option>
                             <option value="all">إحصائيات كل الوقت</option>
                         </select>
+                        <button type="button" id="dashboardRegisterComplaintBtn" class="btn btn-primary pc-dash-register-btn" style="display: none;" onclick="openNewPoliceComplaintFromDashboard()" title="تسجيل شكوى أمنية جديدة">📝 تسجيل شكوى جديدة</button>
                         <button class="btn btn-primary" onclick="openNewSimpleAppointmentModal()" title="حجز موعد جديد">➕ حجز موعد جديد</button>
                         <button class="btn btn-primary" onclick="switchTab('daily-view')" title="عرض مواعيد اليوم">🗓️ مواعيد اليوم</button>
                         <button class="btn btn-primary" onclick="switchTab('stations')" title="فتح دليل المراكز الأمنية">🗺️ دليل المراكز الأمنية</button>
@@ -220,6 +221,55 @@
 
                 <!-- Dashboard Grid -->
                 <div class="dashboard-grid">
+
+                    <!-- Smart Police Complaints Statistics & Action Notifications Widget (Permission-Gated) -->
+                    <div class="card pc-dash-stats-card" id="dashboardPoliceComplaintsCard" style="grid-column: 1 / -1; display: none;">
+                        <div class="card-header">
+                            <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+                                <h3>⚖️ إحصائيات الشكاوى الأمنية الذكية</h3>
+                                <span id="dashPcActionCountBadge" class="badge badge-blue">لا توجد شكاوى معلقة</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                <button type="button" id="dashPcCardRegisterBtn" class="btn btn-primary btn-sm pc-dash-register-btn" style="display: none;" onclick="openNewPoliceComplaintFromDashboard()">📝 تسجيل شكوى جديدة</button>
+                                <button type="button" class="btn btn-outline btn-sm" onclick="switchTab('police-complaints')">عرض سجل الشكاوى</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="pc-dash-kpi-grid" id="dashPcKpiGrid">
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-blue" onclick="openPoliceComplaintFromDashboard(null, '')">
+                                    <span class="pc-dash-kpi-val" id="dashPcTotal">0</span>
+                                    <span class="pc-dash-kpi-lbl">📋 إجمالي الشكاوى</span>
+                                </button>
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-action" onclick="openPoliceComplaintActionQueue()">
+                                    <span class="pc-dash-kpi-val" id="dashPcActionNeeded">0</span>
+                                    <span class="pc-dash-kpi-lbl">🚨 تحتاج اتخاذ إجراء</span>
+                                </button>
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-amber" onclick="openPoliceComplaintFromDashboard(null, 'pending_section_head')">
+                                    <span class="pc-dash-kpi-val" id="dashPcPendingSection">0</span>
+                                    <span class="pc-dash-kpi-lbl">🛡️ بانتظار رئيس القسم</span>
+                                </button>
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-purple" onclick="openPoliceComplaintFromDashboard(null, 'pending_governor')">
+                                    <span class="pc-dash-kpi-val" id="dashPcPendingGovernor">0</span>
+                                    <span class="pc-dash-kpi-lbl">🏛️ بانتظار الحاكم الإداري</span>
+                                </button>
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-teal" onclick="openPoliceComplaintFromDashboard(null, 'approved_in_execution')">
+                                    <span class="pc-dash-kpi-val" id="dashPcApprovedExec">0</span>
+                                    <span class="pc-dash-kpi-lbl">✅ معتمدة / قيد التنفيذ</span>
+                                </button>
+                                <button type="button" class="pc-dash-kpi-tile pc-kpi-danger" onclick="openPoliceComplaintFromDashboard(null, 'overdue_90')">
+                                    <span class="pc-dash-kpi-val" id="dashPcOverdue90">0</span>
+                                    <span class="pc-dash-kpi-lbl">⏳ تجاوزت 90 يوماً</span>
+                                </button>
+                            </div>
+                            <div id="dashPcActionAlertsWrapper" class="pc-dash-alert-box" style="display: none;">
+                                <div class="pc-dash-alert-header">
+                                    <span>🔔 إشعارات الشكاوى التي تحتاج إلى اتخاذ إجراء من قِبلك</span>
+                                    <span class="badge badge-red" id="dashPcAlertHeaderCount">0</span>
+                                </div>
+                                <div class="pc-dash-alert-list" id="dashPcActionAlertsList"></div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- My Reserved Files Widget -->
                     <div class="card" style="grid-column: 1 / -1;">
@@ -545,7 +595,7 @@
                     </div>
                     <div class="pc-header-actions">
                         <button type="button" id="pcToggleScannerBtn" class="btn btn-primary" onclick="toggleScannerIntakePanel()">
-                            📷 مسح شكوى جديدة
+                            📝 تسجيل شكوى جديدة
                         </button>
                         <button type="button" id="pcLlmSettingsBtn" class="btn btn-outline admin-only" style="display: none;" onclick="openLlmSettingsModal()">
                             ⚙️ إعدادات الذكاء الاصطناعي (LLM)
@@ -563,7 +613,7 @@
                         <span class="pc-kpi-count" id="pcStatTotal" data-stat="total">0</span>
                     </button>
                     <button type="button" class="pc-kpi-pill pc-kpi-officer" data-stage="draft">
-                        <span class="pc-kpi-label">📝 مسودة / مسح جديد</span>
+                        <span class="pc-kpi-label">📝 مسودة / تسجيل جديد</span>
                         <span class="pc-kpi-count" id="pcStatPendingOfficer" data-stat="pending_officer">0</span>
                     </button>
                     <button type="button" class="pc-kpi-pill pc-kpi-section" data-stage="pending_section_head">
@@ -612,7 +662,7 @@
                 <div id="scannerIntakeCard" class="card pc-scanner-card mb-3" style="display: none;">
                     <div class="card-header">
                         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-                            <h3>📷 مسح واستقبال شكوى جديدة (السكانر + الذكاء الاصطناعي)</h3>
+                            <h3>📝 تسجيل واستقبال شكوى جديدة (السكانر + الذكاء الاصطناعي)</h3>
                             <span id="pcExtractionStatus" class="badge badge-blue">جاهز لاستقبال الوثيقة</span>
                         </div>
                         <button type="button" class="btn btn-ghost btn-sm" onclick="toggleScannerIntakePanel(false)">✖ إغلاق اللوحة</button>
@@ -1466,8 +1516,8 @@
 
     <!-- Leaflet JS & MAT Application Core Logic -->
     <script src="/leaflet.js"></script>
-    <script src="/complaints/js/police_complaints.js?v=1.46.10"></script>
-    <script src="/complaints/js/app.js?v=1.46.10"></script>
+    <script src="/complaints/js/police_complaints.js?v=1.46.11"></script>
+    <script src="/complaints/js/app.js?v=1.46.11"></script>
     
     <script>
       // Seamless FCM Push Permission & Token Sync

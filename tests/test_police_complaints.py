@@ -416,17 +416,37 @@ class TestDatabaseMigrations(unittest.TestCase):
 
 
 class TestLlmEngine(unittest.TestCase):
+    _LLM_ENV_KEYS = (
+        "MAT_LLM_PROVIDER",
+        "MAT_LLM_MODEL",
+        "MAT_OPENAI_BASE_URL",
+        "MAT_OPENAI_API_KEY",
+        "MAT_GEMINI_API_KEY",
+        "MAT_OLLAMA_URL",
+        "MAT_FALLBACK_LLM_PROVIDER",
+        "MAT_FALLBACK_LLM_MODEL",
+        "MAT_FALLBACK_OPENAI_BASE_URL",
+        "MAT_FALLBACK_OPENAI_API_KEY",
+        "MAT_FALLBACK_GEMINI_API_KEY",
+    )
+
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.tmpdir.name, "test_llm.db")
         self.backup_path = os.path.join(self.tmpdir.name, "backup.json")
         self.orig_db = server.DB_PATH
         self.orig_backup = server.BACKUP_JSON_PATH
+        self.orig_llm_env = {k: os.environ.pop(k, None) for k in self._LLM_ENV_KEYS}
         server.DB_PATH = self.db_path
         server.BACKUP_JSON_PATH = self.backup_path
         server.init_db()
 
     def tearDown(self):
+        for k, v in self.orig_llm_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         server.DB_PATH = self.orig_db
         server.BACKUP_JSON_PATH = self.orig_backup
         self.tmpdir.cleanup()

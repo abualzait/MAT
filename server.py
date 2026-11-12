@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.10) ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.11) ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -2902,13 +2902,16 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
             ORDER BY sa.updated_at DESC, sa.appointment_date DESC
         ''').fetchall())
 
+        police_summary = mat_complaints_service.get_dashboard_police_summary(conn, user)
+
         conn.close()
         self.send_json({
             'stats': stats,
             'today_appointments': today_appts,
             'top_searched_areas': top_searched_areas,
             'my_reserved_files': mat_reserved_files,
-            'no_answer_appointments': no_answer_appts
+            'no_answer_appointments': no_answer_appts,
+            'police_complaints_summary': police_summary
         })
 
     def api_log_search(self):

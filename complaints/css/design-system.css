@@ -3549,6 +3549,165 @@ input:checked + .slider:before {
   }
 }
 
+/* Dashboard Smart Police Complaints Card & Action Alerts */
+.pc-dash-register-btn {
+  background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%) !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 3px 10px rgba(13, 148, 136, 0.25);
+}
+.pc-dash-register-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.pc-dash-stats-card {
+  border-top: 4px solid #0d9488;
+}
+
+.pc-dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.pc-dash-kpi-tile {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-right: 4px solid #3b82f6;
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  text-align: right;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  font-family: inherit;
+}
+
+.pc-dash-kpi-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  border-color: #94a3b8;
+}
+
+.pc-dash-kpi-val {
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.pc-dash-kpi-lbl {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.pc-dash-kpi-tile.pc-kpi-blue { border-right-color: #2563eb; }
+.pc-dash-kpi-tile.pc-kpi-blue .pc-dash-kpi-val { color: #1d4ed8; }
+.pc-dash-kpi-tile.pc-kpi-action { border-right-color: #059669; }
+.pc-dash-kpi-tile.pc-kpi-action .pc-dash-kpi-val { color: #059669; }
+.pc-dash-kpi-tile.pc-kpi-action.has-urgent-action {
+  border-right-color: #dc2626;
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+.pc-dash-kpi-tile.pc-kpi-action.has-urgent-action .pc-dash-kpi-val { color: #dc2626; }
+.pc-dash-kpi-tile.pc-kpi-amber { border-right-color: #d97706; }
+.pc-dash-kpi-tile.pc-kpi-amber .pc-dash-kpi-val { color: #b45309; }
+.pc-dash-kpi-tile.pc-kpi-purple { border-right-color: #7c3aed; }
+.pc-dash-kpi-tile.pc-kpi-purple .pc-dash-kpi-val { color: #6d28d9; }
+.pc-dash-kpi-tile.pc-kpi-teal { border-right-color: #0d9488; }
+.pc-dash-kpi-tile.pc-kpi-teal .pc-dash-kpi-val { color: #0f766e; }
+.pc-dash-kpi-tile.pc-kpi-danger { border-right-color: #dc2626; }
+.pc-dash-kpi-tile.pc-kpi-danger .pc-dash-kpi-val { color: #b91c1c; }
+
+.pc-dash-alert-box {
+  margin-top: 1rem;
+  border-radius: 12px;
+  border: 1px solid #fdba74;
+  border-right: 4px solid #ea580c;
+  background: linear-gradient(135deg, #fffbeb 0%, #fff7ed 100%);
+  padding: 0.85rem 1rem;
+}
+
+.pc-dash-alert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: #9a3412;
+}
+
+.pc-dash-alert-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.7rem;
+}
+
+.pc-dash-alert-item {
+  background: #ffffff;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.pc-dash-alert-item:hover {
+  transform: translateY(-2px);
+  border-color: #ea580c;
+  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.12);
+}
+
+.pc-dash-alert-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.pc-dash-alert-num {
+  font-weight: 800;
+  font-size: 0.86rem;
+  color: #1e3a8a;
+}
+
+.pc-dash-alert-subj {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.pc-dash-alert-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.pc-notif-section-title {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #9a3412;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+}
+
 /* Official Police Complaint Print Sheet */
 @media print {
   .pc-no-print,

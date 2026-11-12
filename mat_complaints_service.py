@@ -2045,3 +2045,121 @@ def register_followup(conn, user: dict, complaint_id: int, action_type: str, not
 
     conn.commit()
     return get_complaint_detail(conn, int(complaint_id))
+
+
+def _parse_tools_set(raw_tools) -> set:
+    if isinstance(raw_tools, (list, tuple, set)):
+        return {str(t).strip() for t in raw_tools if str(t).strip()}
+    return {t.strip() for t in str(raw_tools or "").split(",") if t.strip()}
+
+
+def _determine_complaint_action_need(complaint: dict, role: str):
+    """Return (rank, reason_text) if the complaint requires action by the given role, else None."""
+    stage = str(complaint.get("workflow_stage") or "draft_scan").strip()
+    if stage in ("completed", "stopped_90_days"):
+        return None
+
+    nd = complaint.get("ninety_day_status") or {}
+    is_due_stop = bool(nd.get("is_due_for_stop"))
+    base_rank = None
+    reason = None
+
+    if role == "admin":
+        if stage == "pending_section_head":
+            base_rank, reason = 1, "بانتظار تنسيب رئيس القسم"
+        elif stage in ("draft_scan", "officer_reviewed"):
+            base_rank, reason = 2, "بانتظار المراجعة والتنسيب"
+        elif stage == "governor_rejected":
+            base_rank, reason = 2, "مرفوضة من الحاكم — تحتاج إعادة تنسيب"
+        elif stage in ("governor_approved", "governor_modified", "in_execution"):
+            base_rank, reason = 3, "معتمدة — بانتظار متابعة التنفيذ"
+    elif role == "officer":
+        if stage in ("draft_scan", "officer_reviewed"):
+            base_rank, reason = 1, "مسودة — تحتاج مراجعة ورفع"
+        elif stage == "governor_rejected":
+            base_rank, reason = 1, "مرفوضة من الحاكم — تحتاج تعديل وإعادة رفع"
+        elif stage in ("governor_approved", "governor_modified", "in_execution"):
+            base_rank, reason = 2, "معتمدة — بانتظار التنفيذ والمتابعة"
+    elif role == "governor":
+        if stage == "pending_governor":
+            base_rank, reason = 1, "بانتظار قرار الحاكم الإداري"
+    elif role == "caller":
+        if stage in ("governor_approved", "governor_modified", "in_execution"):
+            base_rank, reason = 1, "مطلوب إجراء اتصال هاتفي ومتابعة"
+
+    if is_due_stop:
+        if reason:
+            reason = f"{reason} (تجاوزت 90 يوماً)"
+            base_rank = min(base_rank, 1)
+        else:
+            base_rank = 1
+            reason = "تجاوزت 90 يوماً — تستحق كف الطلب"
+
+    if not reason:
+        return None
+    if complaint.get("priority") == "عاجل":
+        base_rank = 0
+    return base_rank, reason
+
+
+def get_dashboard_police_summary(conn, user: dict) -> dict:
+    """Return permission-gated police complaints stats and action-needed items for the dashboard."""
+    if not isinstance(user, dict):
+        return {"enabled": False, "can_register": False, "stats": {}, "action_required_count": 0, "action_items": []}
+
+    role = str(user.get("role") or "").strip()
+    tools_set = _parse_tools_set(user.get("accessible_tools"))
+
+    user_id = user.get("user_id") or user.get("id")
+    if user_id:
+        row = conn.execute(
+            "SELECT role, accessible_tools FROM mat_officers WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+        if row:
+            role = str(row["role"] or role).strip()
+            tools_set = _parse_tools_set(row["accessible_tools"])
+
+    has_access = role in ("admin", "governor") or ("police_complaints" in tools_set)
+    if not has_access or role not in ("officer", "admin", "governor", "caller"):
+        return {"enabled": False, "can_register": False, "stats": {}, "action_required_count": 0, "action_items": []}
+
+    effective_user = dict(user)
+    effective_user["role"] = role
+    if user_id and not effective_user.get("user_id"):
+        effective_user["user_id"] = int(user_id)
+
+    listed = list_complaints(conn, effective_user, {"limit": 200})
+    action_entries = []
+    for c in listed.get("complaints") or []:
+        need = _determine_complaint_action_need(c, role)
+        if not need:
+            continue
+        rank, reason = need
+        nd = c.get("ninety_day_status") or {}
+        action_entries.append((
+            rank,
+            -(int(c.get("id") or 0)),
+            {
+                "id": c.get("id"),
+                "complaint_number": c.get("complaint_number") or f"#{c.get('id')}",
+                "subject": c.get("subject") or "بدون موضوع",
+                "workflow_stage": c.get("workflow_stage") or "draft_scan",
+                "status": c.get("status") or "",
+                "priority": c.get("priority") or "عادي",
+                "nearest_station": c.get("nearest_station") or "",
+                "is_due_for_stop": bool(nd.get("is_due_for_stop")),
+                "days_elapsed": int(nd.get("days_elapsed") or 0),
+                "action_reason": reason,
+            },
+        ))
+
+    action_entries.sort(key=lambda item: (item[0], item[1]))
+    action_items = [entry[2] for entry in action_entries]
+    return {
+        "enabled": True,
+        "can_register": role in ("admin", "officer"),
+        "stats": listed.get("stats") or {},
+        "action_required_count": len(action_items),
+        "action_items": action_items[:20],
+    }

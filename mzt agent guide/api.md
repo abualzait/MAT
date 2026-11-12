@@ -19,6 +19,7 @@ All core API endpoints are prefixed with `/api/v1/mat/` (legacy `/api/...` paths
 - **`POST /api/v1/mat/logout`** — Invalidates session token.
 - **`GET /api/v1/mat/me`** — Returns authenticated user info (`id`, `user_id`, `username`, `name`, `role`, `accessible_tools`).
 - **`GET /api/v1/mat/officers` / `POST /api/v1/mat/officers` / `PUT /api/v1/mat/officers/{id}`** — Officer & governor account management (`admin` for mutations; valid roles: `admin`, `officer`, `caller`, `governor`).
+- **`GET /api/v1/mat/simple-dashboard?filter=today|week|month|all`** — Returns appointment stats (`stats`), scheduled appointments, reserved files, searched areas, plus permission-gated `police_complaints_summary` (`{ "enabled": bool, "can_register": bool, "stats": {...}, "action_required_count": int, "action_items": [...] }` when role is `admin`/`governor` or `police_complaints` tool is enabled).
 
 ---
 

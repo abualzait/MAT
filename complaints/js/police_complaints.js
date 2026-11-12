@@ -28,7 +28,7 @@
     ]);
 
     const STAGE_META = {
-        draft_scan: { label: 'مسودة / مسح جديد', badgeClass: 'pc-stage-draft' },
+        draft_scan: { label: 'مسودة / تسجيل جديد', badgeClass: 'pc-stage-draft' },
         officer_reviewed: { label: 'مراجعة الضابط', badgeClass: 'pc-stage-officer' },
         pending_section_head: { label: 'بانتظار رئيس القسم', badgeClass: 'pc-stage-section' },
         pending_governor: { label: 'بانتظار الحاكم الإداري', badgeClass: 'pc-stage-governor' },
@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.10${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.11${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -1709,7 +1709,7 @@
                     ? createEl('button', {
                         type: 'button',
                         className: 'btn btn-primary',
-                        textContent: '📷 مسح / إدخال شكوى جديدة',
+                        textContent: '📝 تسجيل شكوى جديدة',
                         onClick: () => toggleScannerIntakePanel(true)
                     })
                     : null
@@ -3178,7 +3178,7 @@
 
         $('pcResetIntakeBtn')?.addEventListener('click', () => {
             resetIntakeForm();
-            pcToast('تم مسح بيانات نموذج المسح');
+            pcToast('تم مسح بيانات نموذج التسجيل');
         });
 
         const dropZone = $('pcDropZone');

@@ -189,10 +189,19 @@ function renderUserInfo() {
     if (llmBtn) {
         llmBtn.style.display = isAdmin ? 'inline-flex' : 'none';
     }
+    const hasPoliceComplaints = isAdmin || currentUser.role === 'governor' || tools.includes('police_complaints');
+    const canIntake = hasPoliceComplaints && (isAdmin || currentUser.role === 'officer');
     const scannerBtn = document.getElementById('pcToggleScannerBtn');
     if (scannerBtn) {
-        const canIntake = isAdmin || currentUser.role === 'officer';
         scannerBtn.style.display = canIntake ? 'inline-flex' : 'none';
+    }
+    const dashRegBtn = document.getElementById('dashboardRegisterComplaintBtn');
+    if (dashRegBtn) {
+        dashRegBtn.style.display = canIntake ? 'inline-flex' : 'none';
+    }
+    const dashCardRegBtn = document.getElementById('dashPcCardRegisterBtn');
+    if (dashCardRegBtn) {
+        dashCardRegBtn.style.display = canIntake ? 'inline-flex' : 'none';
     }
 
     // Admin Mode Styling Check
@@ -444,7 +453,7 @@ function switchTab(tabId) {
     if (tabId === 'stations') {
         const iframe = document.getElementById('stationsIframe');
         if (iframe && (!iframe.src || iframe.src === 'about:blank' || !iframe.src.includes('Police_Station_Finder'))) {
-            iframe.src = '../Police_Station_Finder.html?v=1.46.10';
+            iframe.src = '../Police_Station_Finder.html?v=1.46.11';
         }
     } else if (tabId === 'appointments') {
         loadSimpleAppointments();
@@ -985,9 +994,29 @@ async function loadSimpleDashboard() {
         // Check Permissions for Dynamic Dashboard UI Pruning
         const tools = parseToolsList(currentUser ? currentUser.accessible_tools : []);
         const isAdmin = currentUser && currentUser.role === 'admin';
-        
+        const role = currentUser ? currentUser.role : '';
+
+        // Smart Police Complaints Dashboard Widget + Top Register Button
+        const policeSummary = data.police_complaints_summary || null;
+        const hasPoliceComplaints = (policeSummary && policeSummary.enabled)
+            || isAdmin
+            || role === 'governor'
+            || tools.includes('police_complaints');
+        const canIntake = hasPoliceComplaints && (
+            (policeSummary && typeof policeSummary.can_register === 'boolean')
+                ? policeSummary.can_register
+                : (isAdmin || role === 'officer')
+        );
+        const dashRegBtn = document.getElementById('dashboardRegisterComplaintBtn');
+        if (dashRegBtn) dashRegBtn.style.display = canIntake ? 'inline-flex' : 'none';
+        const dashCardRegBtn = document.getElementById('dashPcCardRegisterBtn');
+        if (dashCardRegBtn) dashCardRegBtn.style.display = canIntake ? 'inline-flex' : 'none';
+
+        renderDashboardPoliceComplaintsCard(policeSummary, hasPoliceComplaints);
+        syncPoliceActionNotifications(hasPoliceComplaints ? policeSummary : null, true);
+
         // Stats and Appointments widgets
-        const hasAppts = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints') || (currentUser && currentUser.role === 'caller');
+        const hasAppts = isAdmin || tools.includes('complaints') || tools.includes('mat_complaints') || role === 'caller';
         const statsGrid = document.querySelector('.stats-grid');
         if (statsGrid) statsGrid.style.display = 'grid';
         
@@ -1236,6 +1265,368 @@ function getApptMaskClass(status, apptDateStr, apptTimeStr) {
 // ── NOTIFICATIONS ───────────────────────────────────────────
 let notifiedAppointments = new Set();
 let notifiedOverdueAppointments = new Set();
+let notifiedActionComplaints = new Set();
+let latestApptNotifications = [];
+let latestComplaintNotifications = [];
+
+function getUserPoliceComplaintsAccess() {
+    if (!currentUser) return false;
+    const tools = parseToolsList(currentUser.accessible_tools);
+    return currentUser.role === 'admin' || currentUser.role === 'governor' || tools.includes('police_complaints');
+}
+
+function openNewPoliceComplaintFromDashboard() {
+    switchTab('police-complaints');
+    setTimeout(() => {
+        if (typeof toggleScannerIntakePanel === 'function') {
+            toggleScannerIntakePanel(true);
+        }
+    }, 60);
+}
+
+function openPoliceComplaintFromDashboard(complaintId, filterStage) {
+    const stageSel = document.getElementById('pcStageFilter');
+    const day90Chk = document.getElementById('pc90DayFilter');
+    if (filterStage === 'overdue_90') {
+        if (day90Chk) day90Chk.checked = true;
+        if (stageSel) stageSel.value = '';
+    } else if (typeof filterStage === 'string') {
+        if (day90Chk) day90Chk.checked = false;
+        if (stageSel) stageSel.value = filterStage;
+    }
+    switchTab('police-complaints');
+    if (complaintId && typeof openPoliceComplaintDetail === 'function') {
+        setTimeout(() => openPoliceComplaintDetail(complaintId), 80);
+    }
+}
+
+function openPoliceComplaintActionQueue() {
+    if (latestComplaintNotifications.length === 1 && latestComplaintNotifications[0].id) {
+        openPoliceComplaintFromDashboard(latestComplaintNotifications[0].id);
+        return;
+    }
+    const role = currentUser ? currentUser.role : '';
+    let defaultStage = '';
+    if (role === 'admin') defaultStage = 'pending_section_head';
+    else if (role === 'governor') defaultStage = 'pending_governor';
+    else if (role === 'officer') defaultStage = 'draft';
+    openPoliceComplaintFromDashboard(null, defaultStage);
+}
+
+function showPoliceComplaintActionToast(message, complaintId = null) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.style.cursor = 'pointer';
+    toast.style.borderRight = '4px solid #ea580c';
+    toast.title = 'انقر لفتح الشكوى واتخاذ الإجراء المطلوب';
+    toast.addEventListener('click', () => {
+        if (complaintId) {
+            openPoliceComplaintFromDashboard(complaintId);
+        } else {
+            openPoliceComplaintActionQueue();
+        }
+    });
+
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = '⚖️';
+    const msgDiv = document.createElement('div');
+    msgDiv.style.flex = '1';
+    msgDiv.textContent = String(message || '');
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = 'badge badge-red';
+    badgeSpan.style.fontSize = '0.72rem';
+    badgeSpan.textContent = 'اتخاذ إجراء';
+
+    toast.appendChild(iconSpan);
+    toast.appendChild(msgDiv);
+    toast.appendChild(badgeSpan);
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 7000);
+}
+
+function renderDashboardPoliceComplaintsCard(summary, hasAccess) {
+    const card = document.getElementById('dashboardPoliceComplaintsCard');
+    if (!card) return;
+    if (!hasAccess || !summary || !summary.enabled) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = 'block';
+    const stats = summary.stats || {};
+    const actionCount = Number(summary.action_required_count || 0);
+    const items = Array.isArray(summary.action_items) ? summary.action_items : [];
+
+    const setStat = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(Number(val || 0));
+    };
+    setStat('dashPcTotal', stats.total);
+    setStat('dashPcActionNeeded', actionCount);
+    setStat('dashPcPendingSection', stats.pending_section_head);
+    setStat('dashPcPendingGovernor', stats.pending_governor);
+    setStat('dashPcApprovedExec', stats.approved_in_execution);
+    setStat('dashPcOverdue90', stats.overdue_90);
+
+    const actionTile = document.getElementById('dashPcActionNeeded')?.closest('.pc-dash-kpi-tile');
+    if (actionTile) {
+        actionTile.classList.toggle('has-urgent-action', actionCount > 0);
+    }
+
+    const headerBadge = document.getElementById('dashPcActionCountBadge');
+    if (headerBadge) {
+        if (actionCount > 0) {
+            headerBadge.className = 'badge badge-red';
+            headerBadge.textContent = `🚨 تحتاج اتخاذ إجراء: ${actionCount}`;
+        } else {
+            headerBadge.className = 'badge badge-green';
+            headerBadge.textContent = '✅ لا توجد شكاوى معلقة لإجرائك';
+        }
+    }
+
+    const alertsWrapper = document.getElementById('dashPcActionAlertsWrapper');
+    const alertsList = document.getElementById('dashPcActionAlertsList');
+    const headerCount = document.getElementById('dashPcAlertHeaderCount');
+    if (alertsWrapper && alertsList) {
+        if (items.length === 0) {
+            alertsWrapper.style.display = 'none';
+            alertsList.replaceChildren();
+        } else {
+            alertsWrapper.style.display = 'block';
+            if (headerCount) headerCount.textContent = String(actionCount);
+
+            const frag = document.createDocumentFragment();
+            items.slice(0, 6).forEach((item) => {
+                const row = document.createElement('div');
+                row.className = 'pc-dash-alert-item';
+                row.setAttribute('role', 'button');
+                row.tabIndex = 0;
+                const openItem = () => openPoliceComplaintFromDashboard(item.id);
+                row.addEventListener('click', openItem);
+                row.addEventListener('keydown', (ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        openItem();
+                    }
+                });
+
+                const topRow = document.createElement('div');
+                topRow.className = 'pc-dash-alert-top';
+                const numSpan = document.createElement('span');
+                numSpan.className = 'pc-dash-alert-num';
+                numSpan.textContent = `📄 ${item.complaint_number || `#${item.id}`}`;
+                topRow.appendChild(numSpan);
+
+                const badgesWrap = document.createElement('div');
+                badgesWrap.style.display = 'flex';
+                badgesWrap.style.gap = '4px';
+                badgesWrap.style.flexWrap = 'wrap';
+                if (item.priority === 'عاجل') {
+                    const urg = document.createElement('span');
+                    urg.className = 'badge badge-red';
+                    urg.style.fontSize = '0.7rem';
+                    urg.textContent = '⚡ عاجل';
+                    badgesWrap.appendChild(urg);
+                }
+                if (item.is_due_for_stop) {
+                    const ov = document.createElement('span');
+                    ov.className = 'badge badge-red';
+                    ov.style.fontSize = '0.7rem';
+                    ov.textContent = `⏳ ${item.days_elapsed || 90} يوماً`;
+                    badgesWrap.appendChild(ov);
+                }
+                const actBadge = document.createElement('span');
+                actBadge.className = 'badge badge-purple';
+                actBadge.style.fontSize = '0.7rem';
+                actBadge.textContent = item.action_reason || 'تحتاج اتخاذ إجراء';
+                badgesWrap.appendChild(actBadge);
+                topRow.appendChild(badgesWrap);
+
+                const subjDiv = document.createElement('div');
+                subjDiv.className = 'pc-dash-alert-subj';
+                subjDiv.textContent = item.subject || 'بدون موضوع';
+
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'pc-dash-alert-meta';
+                const stationSpan = document.createElement('span');
+                stationSpan.textContent = item.nearest_station ? `🚔 ${item.nearest_station}` : '⚖️ متابعة الشكوى';
+                const ctaSpan = document.createElement('span');
+                ctaSpan.style.color = '#ea580c';
+                ctaSpan.style.fontWeight = '700';
+                ctaSpan.textContent = 'معالجة الآن ⬅️';
+                metaDiv.appendChild(stationSpan);
+                metaDiv.appendChild(ctaSpan);
+
+                row.appendChild(topRow);
+                row.appendChild(subjDiv);
+                row.appendChild(metaDiv);
+                frag.appendChild(row);
+            });
+            alertsList.replaceChildren(frag);
+        }
+    }
+}
+
+function syncPoliceActionNotifications(policeSummary, triggerToasts = false) {
+    if (!policeSummary || !policeSummary.enabled) {
+        latestComplaintNotifications = [];
+        renderTopNotificationsPanel();
+        return;
+    }
+
+    const items = Array.isArray(policeSummary.action_items) ? policeSummary.action_items : [];
+    latestComplaintNotifications = items;
+    renderTopNotificationsPanel();
+
+    if (!triggerToasts || items.length === 0) return;
+
+    const unseen = items.filter((item) => {
+        const key = `${item.id}:${item.workflow_stage}:${item.is_due_for_stop ? 1 : 0}`;
+        return !notifiedActionComplaints.has(key);
+    });
+    if (unseen.length === 0) return;
+
+    unseen.forEach((item) => {
+        const key = `${item.id}:${item.workflow_stage}:${item.is_due_for_stop ? 1 : 0}`;
+        notifiedActionComplaints.add(key);
+    });
+
+    if (unseen.length === 1) {
+        const one = unseen[0];
+        showPoliceComplaintActionToast(
+            `شكوى ${one.complaint_number || `#${one.id}`} تحتاج اتخاذ إجراء: ${one.action_reason || one.subject}`,
+            one.id
+        );
+    } else {
+        showPoliceComplaintActionToast(
+            `يوجد ${unseen.length} شكاوى أمنية تحتاج إلى اتخاذ إجراء من قِبلك`,
+            null
+        );
+    }
+}
+
+function renderTopNotificationsPanel() {
+    const badge = document.getElementById('notificationBadge');
+    const listContainer = document.getElementById('notificationList');
+    if (!badge || !listContainer) return;
+
+    const totalCount = latestComplaintNotifications.length + latestApptNotifications.length;
+    if (totalCount > 0) {
+        badge.textContent = String(totalCount);
+        badge.style.display = 'inline-block';
+    } else {
+        badge.style.display = 'none';
+    }
+
+    if (totalCount === 0) {
+        const empty = document.createElement('div');
+        empty.style.padding = '1rem';
+        empty.style.textAlign = 'center';
+        empty.style.color = 'var(--text-muted)';
+        empty.style.fontSize = '0.9rem';
+        empty.textContent = 'لا توجد تنبيهات أو شكاوى معلقة حالياً';
+        listContainer.replaceChildren(empty);
+        return;
+    }
+
+    const frag = document.createDocumentFragment();
+
+    if (latestComplaintNotifications.length > 0) {
+        const secHeader = document.createElement('div');
+        secHeader.className = 'pc-notif-section-title';
+        secHeader.textContent = `⚖️ شكاوى تحتاج اتخاذ إجراء (${latestComplaintNotifications.length})`;
+        frag.appendChild(secHeader);
+
+        latestComplaintNotifications.slice(0, 10).forEach((item) => {
+            const row = document.createElement('div');
+            row.style.padding = '10px';
+            row.style.borderBottom = '1px solid #eee';
+            row.style.cursor = 'pointer';
+            row.style.transition = 'background 0.2s';
+            row.addEventListener('mouseenter', () => { row.style.background = '#fff7ed'; });
+            row.addEventListener('mouseleave', () => { row.style.background = 'transparent'; });
+            row.addEventListener('click', () => {
+                openPoliceComplaintFromDashboard(item.id);
+                toggleNotificationPanel();
+            });
+
+            const titleDiv = document.createElement('div');
+            titleDiv.style.fontWeight = '700';
+            titleDiv.style.fontSize = '0.88rem';
+            titleDiv.style.color = '#0f172a';
+            titleDiv.textContent = `📄 ${item.complaint_number || `#${item.id}`} — ${item.subject || 'بدون موضوع'}`;
+
+            const reasonDiv = document.createElement('div');
+            reasonDiv.style.fontSize = '0.78rem';
+            reasonDiv.style.color = '#c2410c';
+            reasonDiv.style.marginTop = '3px';
+            reasonDiv.style.fontWeight = '700';
+            reasonDiv.textContent = `🚨 ${item.action_reason || 'تحتاج اتخاذ إجراء'} | 👁️ معاينة واتخاذ قرار`;
+
+            row.appendChild(titleDiv);
+            row.appendChild(reasonDiv);
+            frag.appendChild(row);
+        });
+    }
+
+    if (latestApptNotifications.length > 0) {
+        const apptHeader = document.createElement('div');
+        apptHeader.className = 'pc-notif-section-title';
+        apptHeader.style.background = '#eff6ff';
+        apptHeader.style.color = '#1e40af';
+        apptHeader.style.borderColor = '#bfdbfe';
+        apptHeader.textContent = `📅 مواعيد اليوم القريبة (${latestApptNotifications.length})`;
+        frag.appendChild(apptHeader);
+
+        latestApptNotifications.slice().sort((a, b) => a.diffMins - b.diffMins).forEach((a) => {
+            let timeText = a.diffMins > 0 ? `بعد ${Math.round(a.diffMins)} دقيقة` : `قبل ${Math.abs(Math.round(a.diffMins))} دقيقة`;
+            if (a.diffMins > 60) timeText = `الساعة ${a.appointment_time}`;
+
+            const row = document.createElement('div');
+            row.style.padding = '10px';
+            row.style.borderBottom = '1px solid #eee';
+            row.style.cursor = 'pointer';
+            row.style.transition = 'background 0.2s';
+            row.addEventListener('mouseenter', () => { row.style.background = '#f1f5f9'; });
+            row.addEventListener('mouseleave', () => { row.style.background = 'transparent'; });
+            row.addEventListener('click', () => {
+                openAppointmentDetail(a.id);
+                toggleNotificationPanel();
+            });
+
+            const visitorDiv = document.createElement('div');
+            visitorDiv.style.fontWeight = 'bold';
+            visitorDiv.style.fontSize = '0.9rem';
+            visitorDiv.style.color = '#0f172a';
+            visitorDiv.textContent = a.visitor_name || '';
+
+            const caseDiv = document.createElement('div');
+            caseDiv.style.fontSize = '0.8rem';
+            caseDiv.style.color = 'var(--text-secondary)';
+            caseDiv.textContent = `قضية: ${a.case_number || ''}`;
+
+            const timeDiv = document.createElement('div');
+            timeDiv.style.fontSize = '0.75rem';
+            timeDiv.style.color = 'var(--accent-primary)';
+            timeDiv.style.marginTop = '4px';
+            timeDiv.style.fontWeight = '700';
+            timeDiv.textContent = `⏱️ ${timeText} | 📋 معاينة التفاصيل`;
+
+            row.appendChild(visitorDiv);
+            row.appendChild(caseDiv);
+            row.appendChild(timeDiv);
+            frag.appendChild(row);
+        });
+    }
+
+    listContainer.replaceChildren(frag);
+}
 
 function startNotificationsPolling() {
     // Check every 60 seconds
@@ -1248,87 +1639,72 @@ async function pollUpcomingAppointments() {
     const todayStr = new Date().toISOString().split('T')[0];
     try {
         const res = await fetch(`/api/v1/mat/simple-appointments?from=${todayStr}&to=${todayStr}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.appointments) return;
-        
-        const now = new Date();
-        let upcomingList = [];
-        
-        // Collect parent appointment IDs to filter out postponed parent records
-        const parentIds = new Set(data.appointments.map(x => x.parent_appointment_id).filter(Boolean));
-        
-        data.appointments.forEach(a => {
-            if (a.status !== 'مُجدول') return;
-            if (parentIds.has(a.id)) return;
-            if (!a.appointment_time) return;
-            
-            const [hours, minutes] = a.appointment_time.split(':');
-            const apptTime = new Date();
-            apptTime.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-            
-            const diffMs = apptTime - now;
-            const diffMins = diffMs / 60000;
-            
-            // ── CHECK 1: Notify if appointment is within next 30 minutes ──
-            if (diffMins > 0 && diffMins <= 30 && !notifiedAppointments.has(a.id)) {
-                notifiedAppointments.add(a.id);
-                showToast(`🔔 موعد قريب: المراجع ${a.visitor_name} في قضية ${a.case_number} خلال ${Math.round(diffMins)} دقيقة.`, false, a.id);
-            }
+        if (res.ok) {
+            const data = await res.json();
+            if (data.appointments) {
+                const now = new Date();
+                let upcomingList = [];
 
-            // ── CHECK 2: Notify & Prompt if appointment time has passed today (Overdue & still 'مُجدول') ──
-            if (diffMins <= 0 && diffMins >= -12 * 60 && !notifiedOverdueAppointments.has(a.id)) {
-                notifiedOverdueAppointments.add(a.id);
-                showToast(`⏰ انقضى وقت الموعد للمراجع (${a.visitor_name}) قضية: ${a.case_number}. يرجى إدخال الملاحظات وتحديث الحالة.`, true, a.id, true);
-                openOverdueUpdateModal(a.id);
-            }
+                // Collect parent appointment IDs to filter out postponed parent records
+                const parentIds = new Set(data.appointments.map(x => x.parent_appointment_id).filter(Boolean));
 
-            // Collect active upcoming appointments for today (-60 mins to +24 hours)
-            if (diffMins > -60 && diffMins < 24*60) {
-                upcomingList.push({ ...a, diffMins });
-            }
-        });
+                data.appointments.forEach(a => {
+                    if (a.status !== 'مُجدول') return;
+                    if (parentIds.has(a.id)) return;
+                    if (!a.appointment_time) return;
 
-        // Deduplicate by visitor_name + case_number to keep only latest active appointment
-        const activeMap = new Map();
-        upcomingList.forEach(item => {
-            const key = `${item.case_number}_${item.visitor_name}`;
-            if (!activeMap.has(key) || activeMap.get(key).id < item.id) {
-                activeMap.set(key, item);
-            }
-        });
-        upcomingList = Array.from(activeMap.values());
+                    const [hours, minutes] = a.appointment_time.split(':');
+                    const apptTime = new Date();
+                    apptTime.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
 
-        // Update UI Panel
-        const badge = document.getElementById('notificationBadge');
-        const listContainer = document.getElementById('notificationList');
-        
-        if (badge && listContainer) {
-            if (upcomingList.length > 0) {
-                badge.textContent = upcomingList.length;
-                badge.style.display = 'inline-block';
-                
-                let html = '';
-                upcomingList.sort((a,b) => a.diffMins - b.diffMins).forEach(a => {
-                    let timeText = a.diffMins > 0 ? `بعد ${Math.round(a.diffMins)} دقيقة` : `قبل ${Math.abs(Math.round(a.diffMins))} دقيقة`;
-                    if (a.diffMins > 60) timeText = `الساعة ${a.appointment_time}`;
-                    
-                    html += `
-                        <div style="padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s;" 
-                             onclick="openAppointmentDetail(${a.id}); toggleNotificationPanel();" 
-                             onmouseover="this.style.background='#f1f5f9'" 
-                             onmouseout="this.style.background='transparent'">
-                            <div style="font-weight: bold; font-size: 0.9rem; color:#0f172a;">${a.visitor_name}</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">قضية: ${a.case_number}</div>
-                            <div style="font-size: 0.75rem; color: var(--accent-primary); margin-top: 4px; font-weight: 700;">⏱️ ${timeText} | 📋 معاينة التفاصيل</div>
-                        </div>
-                    `;
+                    const diffMs = apptTime - now;
+                    const diffMins = diffMs / 60000;
+
+                    // ── CHECK 1: Notify if appointment is within next 30 minutes ──
+                    if (diffMins > 0 && diffMins <= 30 && !notifiedAppointments.has(a.id)) {
+                        notifiedAppointments.add(a.id);
+                        showToast(`🔔 موعد قريب: المراجع ${a.visitor_name} في قضية ${a.case_number} خلال ${Math.round(diffMins)} دقيقة.`, false, a.id);
+                    }
+
+                    // ── CHECK 2: Notify & Prompt if appointment time has passed today (Overdue & still 'مُجدول') ──
+                    if (diffMins <= 0 && diffMins >= -12 * 60 && !notifiedOverdueAppointments.has(a.id)) {
+                        notifiedOverdueAppointments.add(a.id);
+                        showToast(`⏰ انقضى وقت الموعد للمراجع (${a.visitor_name}) قضية: ${a.case_number}. يرجى إدخال الملاحظات وتحديث الحالة.`, true, a.id, true);
+                        openOverdueUpdateModal(a.id);
+                    }
+
+                    // Collect active upcoming appointments for today (-60 mins to +24 hours)
+                    if (diffMins > -60 && diffMins < 24 * 60) {
+                        upcomingList.push({ ...a, diffMins });
+                    }
                 });
-                listContainer.innerHTML = html;
-            } else {
-                badge.style.display = 'none';
-                listContainer.innerHTML = '<div style="padding: 1rem; text-align: center; color: var(--text-muted); font-size: 0.9rem;">لا توجد مواعيد مجدولة قريبة</div>';
+
+                // Deduplicate by visitor_name + case_number to keep only latest active appointment
+                const activeMap = new Map();
+                upcomingList.forEach(item => {
+                    const key = `${item.case_number}_${item.visitor_name}`;
+                    if (!activeMap.has(key) || activeMap.get(key).id < item.id) {
+                        activeMap.set(key, item);
+                    }
+                });
+                latestApptNotifications = Array.from(activeMap.values());
             }
+        }
+
+        // Poll police complaints needing action if user has permission
+        if (getUserPoliceComplaintsAccess()) {
+            const dashRes = await fetch('/api/v1/mat/simple-dashboard?filter=today');
+            if (dashRes.ok) {
+                const dashData = await dashRes.json();
+                const summary = dashData.police_complaints_summary || null;
+                syncPoliceActionNotifications(summary, true);
+                const dashTab = document.getElementById('tab-dashboard');
+                if (dashTab && dashTab.classList.contains('active')) {
+                    renderDashboardPoliceComplaintsCard(summary, getUserPoliceComplaintsAccess());
+                }
+            }
+        } else {
+            renderTopNotificationsPanel();
         }
     } catch (e) {
         console.error('Notifications poll failed', e);

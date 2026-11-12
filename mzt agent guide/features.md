@@ -1,6 +1,14 @@
 # Project Features & Roadmap — MAT (Amman Police Stations)
 
-## Current Features (Version 1.46.10)
+## Current Features (Version 1.46.11)
+
+### التحديث v1.46.11 (إحصائيات الشكاوى وإشعارات اتخاذ الإجراء وزر تسجيل شكوى في لوحة التحكم)
+1. **كارد إحصائيات الشكاوى الذكية في لوحة التحكم (`complaints/app.html` و`app.js` و`mat_complaints_service.py`):**
+   - عند امتلاك المستخدم لصلاحية الشكاوى (`police_complaints` أو دور `admin` / `governor`) يظهر في تبويب لوحة التحكم الرئيسية كارد متكامل (`#dashboardPoliceComplaintsCard`) يعرض إجمالي الشكاوى، الشكاوى التي تحتاج لاتخاذ إجراء، بانتظار رئيس القسم، بانتظار الحاكم الإداري، المعتمدة / قيد التنفيذ، والمتجاوزة لـ 90 يوماً، مع اختصارات تفاعلية للانتقال والفلترة المباشرة.
+2. **إشعارات الشكاوى التي تحتاج لاتخاذ إجراء (`get_dashboard_police_summary` + جرس التنبيهات + Toast):**
+   - حساب الشكاوى التي تنتظر إجراء المستخدم الحالي حسب دوره (`draft_scan`/`governor_rejected` للضابط، `pending_section_head` لرئيس القسم، `pending_governor` للحاكم، والتنفيذ/المتجاوزة 90 يوماً) وعرضها داخل تنبيه بارز في لوحة التحكم (`#dashPcActionAlertsWrapper`) وفي قائمة جرس التنبيهات العلوي (`#notificationBadge`/`#notificationList`) وتنبيه منبثق لمرة واحدة بالجلسة، بدون `innerHTML` لضمان الحماية من XSS.
+3. **زر تسجيل شكوى جديدة وتوحيد المسمى:**
+   - إضافة زر `📝 تسجيل شكوى جديدة` (`#dashboardRegisterComplaintBtn` و`#dashPcCardRegisterBtn`) في شريط لوحة التحكم وكارد الإحصائيات لمن يملك صلاحية الإدخال (`admin` / `officer`)، وتغيير تسمية `مسح شكوى جديدة` إلى `تسجيل شكوى جديدة` في تبويب الشكاوى الذكية.
 
 ### التحديث v1.46.10 (اعتماد Groq `qwen/qwen3.8-27b` السريع مع احتياطي OpenRouter التلقائي وحماية `1000 OTPM`)
 1. **تكامل Groq LPU فائق السرعة (`mat_llm_engine.py`):**

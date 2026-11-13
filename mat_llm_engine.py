@@ -42,65 +42,47 @@ COMPLAINT_EXTRACTION_PROMPT = """أنت خبير قانوني ومحرر وثا�
 المطلوب منك تفريغ محتويات الشكوى من الصورة بدقة حرفية متناهية وإجراء التحليل الإداري والقانوني للشكوى وتحديد مدى الحاجة لمتابعة المراكز الأمنية.
 
 تعليمات الدقة الصارمة (إلزامية):
-- افحص اتجاه الورقة أولاً وضع القيمة الصحيحة في حقل `detected_rotation_cw` (أحد الأرقام الحصرية: `0` أو `90` أو `180` أو `270`): `0` إذا كانت الترويسة أعلى الصورة والنص معتدل، `90` إذا كانت الترويسة على اليسار وتحتاج الصورة تدوير 90° مع عقارب الساعة لتعتدل، `180` إذا كانت الورقة مقلوبة رأساً على عقب وتحتاج تدوير 180°، `270` إذا كانت الترويسة على اليمين وتحتاج تدوير 270° مع عقارب الساعة (90° عكس العقارب).
-- ابدأ بتعبئة حقل `raw_transcription` بنسخ كل سطر مقروء في الورقة من الأعلى إلى الأسفل باللغة العربية السليمة حرفياً قبل تعبئة باقي الحقول.
-- اقرأ الجداول بعناية من اليمين إلى اليسار: جدول (بيانات المشتكين / المدعين) يذهب إلى `complainants`، وجدول (بيانات المشتكى عليهم) يذهب إلى `respondents`.
-- انقل الأسماء والرقم الوطني (غالباً 10 أرقام) ورقم الهاتف (يبدأ غالباً بـ 07) والعناوين والتاريخ (`paper_date` أعلى الورقة) ونص الشكوى (`summary`) حرفاً بحرف ورقماً برقم كما هي في الصورة تماماً.
-- لا تخمّن أو تؤلف أي اسم أو رقم غير مقروء؛ إذا كانت خانة فارغة أو غير مقروءة تماماً اتركها نصاً فارغاً "" (أو اكتب [غير واضح] فقط داخل `raw_transcription`).
-- إذا ورد إقرار مثل "أقر بعدم وجود قضية منظورة أمام المحاكم بخصوص هذه الشكوى" مع إشارة (✓ / نعم) فإن `no_pending_lawsuit_declared` تكون `true`، وإذا ذُكر وجود قضية قائمة أو وضع علامة لا تكون `false`.
-- إذا ظهر توقيع خطي أو اسم في خانة توقيع المشتكي أسفل الورقة فإن `has_signature` تكون `true`.
-- اكتب جميع النصوص المستخرجة والتحليل والتوصية باللغة العربية السليمة فقط دون إدخال كلمات إنجليزية أو أجنبية.
+- افحص اتجاه الورقة أولاً وضع القيمة الصحيحة في حقل `detected_rotation_cw` (أحد الأرقام الحصرية: `0` أو `90` أو `180` أو `270`): `0` إذا كانت الترويسة أعلى الصورة والنص معتدل، `90` إذا كانت الترويسة على اليسار وتحتاج تدوير 90° مع عقارب الساعة، `180` إذا كانت مقلوبة، `270` إذا كانت الترويسة على اليمين وتحتاج تدوير 270°.
+- انقل الأسماء والرقم الوطني ورقم الهاتف (يبدأ غالباً بـ 07) والعناوين والتاريخ (`paper_date` أعلى الورقة) وموضوع الشكوى ونصوص الوقائع حرفاً بحرف ورقماً برقم كما هي مسطورة في الصورة تماماً دون تحريف أو اختلاق قصة متخيلة.
+- ممنوع نهائياً تلفيق أو تخمين أو تكرار أي عبارات؛ إذا لم تكن كلمة واضحة فاكتب [غير واضح].
+- إذا ورد إقرار بعدم وجود قضية منظورة أمام المحاكم فإن `no_pending_lawsuit_declared` تكون `true`.
+- إذا ظهر توقيع خطي في خانة توقيع المشتكي أسفل الورقة فإن `has_signature` تكون `true`.
 - في التحليل القانوني والإداري: حدد بدقة **الجهة المسؤولة وصاحبة الصلاحية** (`jurisdiction_scope` و`competent_authority`) وفق القوانين الأردنية:
-  1) `الحاكم الإداري`: للتعهدات الإدارية (قانون منع الجرائم)، إزالة الضرر أو التعدي، الخلافات الأسرية/الجوار البسيطة القابلة للصلح، كف الطلب، والتهديدات غير الجسيمة.
-  2) `مركز الشرطة`: للمشاجرات والاعتداءات البسيطة، الإزعاج المتكرر، الضبط الفوري، استدعاء الأطراف أو التوديع المغفور.
-  3) `القضاء المختص`: للجرائم الجزائية الجسيمة، المطالبات المالية والحقوقية الكبيرة، الشيكات، الإخلاء والمنازعات الإيجارية والتعاقدية المدنية المحضة.
-  4) `حماية المستهلك`: للغش التجاري، التسعير، السلع أو الخدمات المعيبة، وضمانات التجار (مديرية حماية المستهلك / وزارة الصناعة والتجارة).
-  5) `أمانة عمان / البلدية`: لمخالفات البناء، الارتدادات، الاعتداء على الأرصفة، والتراخيص المهنية والصحية.
-  6) `الجرائم الإلكترونية`: للابتزاز، التشهير، أو الاحتيال الإلكتروني عبر الشبكة والمنصات الرقمية.
-  7) `جهة رقابية أخرى`: مع تسمية الجهة الدقيقة (مثل وزارة العمل، دائرة الأراضي، هيئة تنظيم الاتصالات).
+  1) `الحاكم الإداري`: للتعهدات الإدارية والكفالات (قانون منع الجرائم)، إزالة الضرر أو التعدي، إقلاق الراحة والسكينة العامة، الخلافات الأسرية والجوار، والتهديدات غير الجسيمة.
+  2) `مركز الشرطة`: للمشاجرات والاعتداءات البسيطة، الضبط الأمني الفوري، استدعاء الأطراف أو التوديع المغفور.
+  3) `القضاء المختص`: للجرائم الجزائية الجسيمة، المطالبات المالية والحقوقية، الشيكات، والمنازعات المدنية.
+  4) `حماية المستهلك`: للغش التجاري والتسعير وضمانات السلع والخدمات المعيبة.
+  5) `أمانة عمان / البلدية`: لمخالفات البناء والأرصفة والمهن والتراخيص والصحة العامة.
+  6) `الجرائم الإلكترونية`: للابتزاز والتشهير والاحتيال عبر الإنترنت ووسائل الاتصال الحديثة.
+  7) `جهة رقابية أخرى`: مع تسمية الجهة المختصة.
 
-قم بإرجاع النتيجة حصراً بصيغة JSON صالحة ونظيفة وبدون أي مقدمات أو شروحات خارج كائن الـ JSON بالهيكل التالي:
+قم بإرجاع النتيجة حصراً بصيغة JSON نظيفة ومدمجة بالهيكل التالي:
 {
   "detected_rotation_cw": 0,
-  "raw_transcription": "التفريغ الحرفي الكامل لجميع أسطر الورقة من الأعلى للأسفل باللغة العربية",
-  "paper_date": "تاريخ تقديم الشكوى المكتوب في الورقة إن وجد أو فارغ",
-  "complainants": [
-    {
-      "party_category": "أحد الخيارات: مواطن أو مؤسسة تجارية أو مؤسسة حكومية",
-      "name": "الاسم الكامل للمشتكي كما هو مكتوب",
-      "national_id": "الرقم الوطني أو الرقم التجاري بالأرقام فقط",
-      "phone": "رقم الهاتف بالأرقام فقط",
-      "address": "العنوان بالتفصيل كما هو مكتوب"
-    }
-  ],
-  "respondents": [
-    {
-      "party_category": "أحد الخيارات: مواطن أو منشأة",
-      "name": "اسم المشتكى عليه أو اسم المحل/المنشأة كما هو مكتوب",
-      "national_id": "الرقم الوطني إن وجد أو فارغ",
-      "phone": "رقم الهاتف إن وجد أو فارغ",
-      "address": "العنوان بالتفصيل كما هو مكتوب"
-    }
-  ],
+  "paper_date": "التاريخ المكتوب أعلى الورقة إن وجد",
+  "complainant_name": "الاسم الكامل للمشتكي بخط اليد",
+  "complainant_id": "الرقم الوطني للمشتكي بالأرقام",
+  "complainant_phone": "رقم هاتف المشتكي",
+  "complainant_address": "عنوان وسكن المشتكي",
+  "respondent_name": "اسم المشتكى عليه بخط اليد",
+  "respondent_id": "الرقم الوطني للمشتكى عليه إن وجد أو فارغ",
+  "respondent_phone": "رقم هاتف المشتكى عليه",
+  "respondent_address": "عنوان وسكن المشتكى عليه",
   "subject": "موضوع الشكوى بدقة واختصار بالعربية",
-  "summary": "موجز وتفاصيل وقائع الشكوى كما سردها المشتكي حرفياً بالعربية",
+  "summary": "نص ووقائع الشكوى المكتوبة بخط اليد بدقة وأمانة دون أي تكرار",
   "has_signature": true,
   "no_pending_lawsuit_declared": true,
-  "is_minor_police_complaint": true,
+  "is_minor_police_complaint": false,
   "jurisdiction_scope": "الحاكم الإداري",
-  "competent_authority": "الحاكم الإداري (متصرف لواء قصبة عمان) بالتنسيق مع المركز الأمني المختص",
-  "police_necessity_reason": "تحديد دقيق لسبب الاختصاص: لماذا تقع ضمن صلاحيات الحاكم الإداري أو مركز الشرطة أو القضاء أو حماية المستهلك أو الجهة المختصة (جملة إلى جملتين)",
-  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني بدقة بالعربية (جملتان إلى ثلاث جمل)",
-  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح وتوجيه الجهة المسؤولة بوضوح بالعربية (جملتان إلى ثلاث جمل)",
+  "competent_authority": "متصرفية لواء قصبة عمان / الحاكم الإداري بالتنسيق مع المركز الأمني المختص",
+  "police_necessity_reason": "سبب الاختصاص بوضوح: لماذا تقع ضمن صلاحيات الحاكم الإداري أو مركز الشرطة أو القضاء أو حماية المستهلك (جملة إلى جملتين)",
+  "ai_analysis": "تحليل وقائع الشكوى والتكييف الإداري والقانوني بدقة باختصار",
+  "ai_solution_recommendation": "التوصية الإدارية والحل المقترح وتوجيه الجهة المسؤولة بوضوح",
   "ai_recommended_action": "توديع عن طريق مركز أمني",
-  "ai_confidence": 0.92
+  "ai_confidence": 0.95
 }
-الخيارات المسموحة لحقل jurisdiction_scope هي حصراً: 'الحاكم الإداري' | 'مركز الشرطة' | 'القضاء المختص' | 'حماية المستهلك' | 'أمانة عمان / البلدية' | 'الجرائم الإلكترونية' | 'جهة رقابية أخرى'.
-الخيارات المسموحة لحقل ai_recommended_action هي حصراً:
-1) 'توديع عن طريق مركز أمني'
-2) 'اتصال هاتفي'
-3) 'توديع مغفور'
-4) 'حفظ / توجيه للقضاء المختص'"""
+الخيارات المسموحة لحقل jurisdiction_scope: 'الحاكم الإداري' | 'مركز الشرطة' | 'القضاء المختص' | 'حماية المستهلك' | 'أمانة عمان / البلدية' | 'الجرائم الإلكترونية' | 'جهة رقابية أخرى'.
+الخيارات المسموحة لحقل ai_recommended_action: 'توديع عن طريق مركز أمني' | 'اتصال هاتفي' | 'توديع مغفور' | 'حفظ / توجيه للقضاء المختص'"""
 
 
 def _default_model_for_provider(provider: str) -> str:
@@ -382,6 +364,18 @@ def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], D
                 if any(row[k] for k in ("name", "national_id", "phone", "address")):
                     complainants.append(row)
 
+    # Flat field fallback if complainants array was not provided
+    if not complainants and any(ext_src.get(k) for k in ("complainant_name", "complainant_id", "complainant_phone", "complainant_address")):
+        c_row = {
+            "party_category": "مواطن",
+            "name": _clean_extracted_text(ext_src.get("complainant_name"), clear_placeholder=True),
+            "national_id": _normalize_arabic_digits(ext_src.get("complainant_id")),
+            "phone": _normalize_arabic_digits(ext_src.get("complainant_phone")),
+            "address": _clean_extracted_text(ext_src.get("complainant_address"), clear_placeholder=True),
+        }
+        if any(c_row[k] for k in ("name", "national_id", "phone", "address")):
+            complainants.append(c_row)
+
     respondents_raw = ext_src.get("respondents")
     respondents = []
     if isinstance(respondents_raw, list):
@@ -400,8 +394,43 @@ def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], D
                 if any(row[k] for k in ("name", "national_id", "phone", "address")):
                     respondents.append(row)
 
+    # Flat field fallback if respondents array was not provided
+    if not respondents and any(ext_src.get(k) for k in ("respondent_name", "respondent_id", "respondent_phone", "respondent_address")):
+        r_row = {
+            "party_category": "مواطن",
+            "name": _clean_extracted_text(ext_src.get("respondent_name"), clear_placeholder=True),
+            "national_id": _normalize_arabic_digits(ext_src.get("respondent_id")),
+            "phone": _normalize_arabic_digits(ext_src.get("respondent_phone")),
+            "address": _clean_extracted_text(ext_src.get("respondent_address"), clear_placeholder=True),
+        }
+        if any(r_row[k] for k in ("name", "national_id", "phone", "address")):
+            respondents.append(r_row)
+
+    raw_transcription = _clean_extracted_text(ext_src.get("raw_transcription"))
+    if not raw_transcription:
+        # Build clean, complete transcription from parsed fields
+        t_parts = []
+        p_date = _normalize_arabic_digits(ext_src.get("paper_date"))
+        if p_date:
+            t_parts.append(f"تاريخ تقديم الشكوى: {p_date}")
+        if complainants:
+            c = complainants[0]
+            t_parts.append(f"بيانات المشتكي:\n- الاسم: {c.get('name') or ''}\n- الرقم الوطني: {c.get('national_id') or ''}\n- الهاتف: {c.get('phone') or ''}\n- العنوان: {c.get('address') or ''}")
+        if respondents:
+            r = respondents[0]
+            t_parts.append(f"بيانات المشتكى عليه:\n- الاسم: {r.get('name') or ''}\n- الهاتف: {r.get('phone') or ''}\n- العنوان: {r.get('address') or ''}")
+        subj = _clean_extracted_text(ext_src.get("subject"), clear_placeholder=True)
+        if subj:
+            t_parts.append(f"موضوع الشكوى: {subj}")
+        summ = _clean_extracted_text(ext_src.get("summary"), clear_placeholder=True)
+        if summ:
+            t_parts.append(f"وقائع الشكوى:\n{summ}")
+        if ext_src.get("has_signature"):
+            t_parts.append("توقيع المشتكي: مثبت في الوثيقة")
+        raw_transcription = "\n\n".join(t_parts)
+
     extracted = {
-        "raw_transcription": _clean_extracted_text(ext_src.get("raw_transcription")),
+        "raw_transcription": raw_transcription,
         "paper_date": _normalize_arabic_digits(ext_src.get("paper_date")),
         "complainants": complainants,
         "respondents": respondents,
@@ -427,11 +456,14 @@ def _normalize_complaint_result(data: Dict[str, Any]) -> Tuple[Dict[str, Any], D
     else:
         recommended_action = "توديع عن طريق مركز أمني"
 
-    try:
-        conf_val = float(ana_src.get("ai_confidence") or 0.8)
-        conf_val = max(0.0, min(1.0, conf_val))
-    except (ValueError, TypeError):
-        conf_val = 0.8
+    raw_conf = ana_src.get("ai_confidence")
+    if raw_conf is None or str(raw_conf).strip() == "":
+        conf_val = 0.0 if (not extracted["subject"] and not extracted["summary"]) else 0.8
+    else:
+        try:
+            conf_val = max(0.0, min(1.0, float(raw_conf)))
+        except (ValueError, TypeError):
+            conf_val = 0.0 if (not extracted["subject"] and not extracted["summary"]) else 0.8
 
     is_minor = bool(ana_src.get("is_minor_police_complaint", True))
     raw_scope = str(ana_src.get("jurisdiction_scope") or "").strip()
@@ -653,7 +685,7 @@ def _call_openai_with_meta(
                     ],
                 }
             ],
-            "temperature": 0.1 if is_free_openrouter else 0.0,
+            "temperature": 0.1,
             "max_tokens": 900 if is_groq else 4096,
         }
         if use_openrouter_routing:
@@ -661,9 +693,14 @@ def _call_openai_with_meta(
             payload["model"] = candidates[0]
             payload["models"] = candidates
         if use_reasoning_disable:
-            payload["reasoning"] = {"enabled": False}
+            if is_groq:
+                payload["reasoning_effort"] = "none"
+            else:
+                payload["reasoning"] = {"enabled": False}
         if use_freq_penalty:
-            payload["frequency_penalty"] = 0.2
+            payload["frequency_penalty"] = 0.5 if is_groq else 0.2
+            if is_groq:
+                payload["presence_penalty"] = 0.3
         if use_response_format:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -672,8 +709,8 @@ def _call_openai_with_meta(
     use_rf = not is_nvidia_nim
     use_detail = not is_nvidia_nim
     use_or_models = is_free_openrouter
-    use_no_reason = is_free_openrouter
-    use_freq_penalty = is_free_openrouter
+    use_no_reason = is_free_openrouter or is_groq
+    use_freq_penalty = is_free_openrouter or is_groq
     req_timeout = 95 if is_nvidia_nim else (45 if is_groq else 75)
 
     resp_json: Dict[str, Any] = {}
@@ -904,6 +941,27 @@ def _get_fallback_openai_settings(primary_settings: Dict[str, Any]) -> Optional[
 _CJK_OR_CYRILLIC_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\u0400-\u04ff\uac00-\ud7af]")
 _ARABIC_LATIN_SPLICE_RE = re.compile(r"[\u0600-\u06FF][A-Za-z]|[A-Za-z][\u0600-\u06FF]")
 _REPEATED_DUMMY_DIGITS_RE = re.compile(r"(\d)\1{5,}")
+_REPEATED_WORD_LOOP_RE = re.compile(r"(\S{3,})(?:\s+\1){4,}")
+
+
+def _has_severe_ocr_corruption(parsed: Dict[str, Any]) -> bool:
+    """Return True when OCR output contains CJK/Cyrillic or widespread gibberish tokens that must not be rewritten blindly."""
+    if not isinstance(parsed, dict):
+        return True
+    chunks: List[str] = []
+    for k in ("raw_transcription", "subject", "summary"):
+        chunks.append(str(parsed.get(k) or ""))
+    for lk in ("complainants", "respondents"):
+        for r in parsed.get(lk) or []:
+            if isinstance(r, dict):
+                chunks.append(str(r.get("name") or ""))
+                chunks.append(str(r.get("address") or ""))
+    combined = "\n".join(chunks)
+    if _CJK_OR_CYRILLIC_RE.search(combined):
+        return True
+    if len(_ARABIC_LATIN_SPLICE_RE.findall(combined)) >= 3 or len(re.findall(r"[A-Za-z]{2,}", combined)) >= 4:
+        return True
+    return False
 
 
 def _normalize_rotation_cw(raw_val: Any) -> int:
@@ -949,13 +1007,21 @@ def _detect_unreliable_extraction(
     if _CJK_OR_CYRILLIC_RE.search(combined) or len(_ARABIC_LATIN_SPLICE_RE.findall(combined)) >= 1:
         return (
             "تعذرت قراءة الخط اليدوي بدقة كافية بالمحرك الحالي (نتيجة مشوّشة بأحرف أجنبية) — "
-            "تحقق من استقامة الصورة عمودياً باستخدام «🔄 تدوير 90°»، أو فعّل Groq qwen/qwen3.8-27b / Gemini Flash."
+            "تحقق من استقامة الصورة عمودياً أو فعّل Google Gemini Flash من إعدادات الذكاء الاصطناعي."
+        )
+
+    if _REPEATED_WORD_LOOP_RE.search(combined):
+        return (
+            "تعذرت قراءة الوثيقة بدقة (ظهر تكرار غير طبيعي في المخرجات) — يرجى استخدام Google Gemini Flash أو الإدخال يدوياً."
         )
 
     conf = float(analysis.get("ai_confidence") or 0.0)
     subj_str = str(extracted.get("subject") or "")
+    summ_str = str(extracted.get("summary") or "")
     has_party = bool(extracted.get("complainants") or extracted.get("respondents"))
-    if conf < 0.35 and (not subj_str or not extracted.get("summary") or not has_party or "غير مقروء" in subj_str):
+    if not subj_str and not summ_str:
+        return "تعذر استخراج نص واضح ومكتمل من الصورة (انقطعت القراءة أو لم يتعرف النموذج على الخط اليدوي) — يرجى الإدخال يدوياً أو استخدام Google Gemini Flash."
+    if conf < 0.35 and (not subj_str or not summ_str or not has_party or "غير مقروء" in subj_str):
         return "تعذر استخراج نص واضح من الصورة لانخفاض الدقة أو عدم وضوح الخط اليدوي — يرجى التصوير بشكل أقرب وعمودي أو الإدخال يدوياً."
 
     return ""
@@ -1012,7 +1078,12 @@ def _extract_with_single_provider(
 
         detected_rotation_cw = _normalize_rotation_cw(parsed.get("detected_rotation_cw"))
 
-        if provider == "openai" and detected_rotation_cw == 0 and _has_foreign_script_noise(parsed):
+        if (
+            provider == "openai"
+            and detected_rotation_cw == 0
+            and _has_foreign_script_noise(parsed)
+            and not _has_severe_ocr_corruption(parsed)
+        ):
             repaired_parsed, repaired_raw = _repair_mixed_script_ocr_json(parsed, settings)
             if repaired_raw:
                 parsed = repaired_parsed

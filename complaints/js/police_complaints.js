@@ -488,7 +488,7 @@
         const canSwitch = typeof global.switchTab === 'function' && $('tab-stations');
 
         if (canSwitch && iframe) {
-            const targetSrc = `../Police_Station_Finder.html?v=1.46.13${query ? `&q=${encodeURIComponent(query)}` : ''}`;
+            const targetSrc = `../Police_Station_Finder.html?v=1.46.14${query ? `&q=${encodeURIComponent(query)}` : ''}`;
             const applyQueryIntoFinder = () => {
                 if (!query) return;
                 try {
@@ -809,9 +809,9 @@
             const orientation = await getJpegExifOrientation(file);
             const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
             const maxDim = Math.max(bitmap.width || 0, bitmap.height || 0);
-            const MAX_EDGE = 1440;
+            const MAX_EDGE = 1800;
 
-            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 500000) {
+            if (orientation <= 1 && maxDim <= MAX_EDGE && file.size <= 700000) {
                 bitmap.close?.();
                 return readFileAsDataUrl(file);
             }
@@ -829,7 +829,7 @@
             }
             ctx.drawImage(bitmap, 0, 0, outW, outH);
             bitmap.close?.();
-            return canvas.toDataURL('image/jpeg', 0.88);
+            return canvas.toDataURL('image/jpeg', 0.92);
         } catch (_err) {
             return readFileAsDataUrl(file);
         }
@@ -1212,7 +1212,8 @@
         const rotateBtn = $('pcRotateScanBtn');
         if (rotateBtn) rotateBtn.style.display = isPdf ? 'none' : 'inline-flex';
 
-        // Bake EXIF camera rotation tags (3/6/8) directly into upright image pixels immediately on pick
+        // Bake EXIF camera rotation tags (3/6/8) directly into upright pixels and pre-rotate landscape sheets 270 CW before hitting LLM quota
+        let preRotatedLandscape = false;
         if (!isPdf && typeof createImageBitmap === 'function') {
             try {
                 const exifOrient = await getJpegExifOrientation(activeFile);
@@ -1220,8 +1221,14 @@
                     const transformed = await transformImageFile(activeFile, { rotateCw: 0 });
                     activeFile = transformed.file;
                 }
+                const dims = await getImageDimensions(activeFile);
+                if (dims && dims.width > dims.height * 1.15) {
+                    const uprighted = await transformImageFile(activeFile, { rotateCw: 270 });
+                    activeFile = uprighted.file;
+                    preRotatedLandscape = true;
+                }
             } catch (_err) {
-                // Keep original file if browser fails EXIF canvas decode
+                // Keep original file if browser fails canvas normalization
             }
         }
 
@@ -1230,10 +1237,13 @@
         state.pendingLocalPreviewUrl = URL.createObjectURL(activeFile);
 
         renderIntakePreview(state.pendingLocalPreviewUrl, isPdf ? 'application/pdf' : activeFile.type, activeFile.name);
-        setExtractionStatus('جاري تجهيز الوثيقة...', 'badge-blue');
+        setExtractionStatus(
+            preRotatedLandscape ? '🔄 تم تدوير الصورة الأفقية عمودياً — جاري التجهيز...' : 'جاري تجهيز الوثيقة...',
+            'badge-blue'
+        );
 
         if (options.autoExtract !== false) {
-            await runScanExtraction({ autoOrientRemaining: 1 });
+            await runScanExtraction({ autoOrientRemaining: 1, rotatedByCw: preRotatedLandscape ? 270 : 0 });
         }
     }
 

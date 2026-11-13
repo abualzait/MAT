@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.13) ║
+║  MAT (Modular Assistant Toolkit) — حقيبة الأدوات المساعدة (1.46.14) ║
 ║                                                              ║
 ║  يعمل بدون إنترنت على الشبكة المحلية                        ║
 ║  لا يحتاج تثبيت أي مكتبات إضافية                           ║
@@ -3707,7 +3707,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(res)
 
     def api_scan_extract_complaint(self):
-        user = self.require_role('officer', 'admin')
+        user = self.require_role('officer', 'admin', 'governor')
         if not user:
             return
 
@@ -3825,7 +3825,7 @@ class MatServerHandler(http.server.SimpleHTTPRequestHandler):
         })
 
     def api_create_police_complaint(self):
-        user = self.require_role('officer', 'admin')
+        user = self.require_role('officer', 'admin', 'governor')
         if not user:
             return
         data = self.read_json_body()

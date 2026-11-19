@@ -1068,103 +1068,6 @@
             box-shadow: 0 6px 18px rgba(13, 46, 88, 0.25);
         }
 
-        /* ═══ MAP ACADEMIC LAYER TOGGLE BUTTON ═══ */
-        .map-academic-toggle-btn {
-            position: absolute;
-            top: 86px;
-            left: 10px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.96);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1.5px solid #CBD5E1;
-            border-radius: 8px;
-            padding: 6px 12px;
-            font-family: 'Tajawal', sans-serif;
-            font-size: 0.82rem;
-            font-weight: 700;
-            color: #1E293B;
-            cursor: pointer;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.2s ease;
-            user-select: none;
-        }
-
-        .map-academic-toggle-btn:hover {
-            background: #0D2E58;
-            color: #ffffff;
-            border-color: #0D2E58;
-            transform: translateY(-1px);
-            box-shadow: 0 6px 18px rgba(13, 46, 88, 0.25);
-        }
-
-        .map-academic-toggle-btn.active {
-            background: linear-gradient(135deg, #1E3A8A 0%, #0D2E58 100%);
-            color: #FFFFFF;
-            border-color: #3B82F6;
-            box-shadow: 0 4px 16px rgba(30, 58, 138, 0.35);
-        }
-
-        .map-academic-toggle-btn .academic-btn-badge {
-            background: #E2E8F0;
-            color: #475569;
-            font-size: 0.72rem;
-            font-weight: 800;
-            padding: 1px 7px;
-            border-radius: 9999px;
-            transition: all 0.2s ease;
-        }
-
-        .map-academic-toggle-btn.active .academic-btn-badge {
-            background: #F59E0B;
-            color: #0F172A;
-        }
-
-        @media (max-width: 768px) {
-            .map-academic-toggle-btn {
-                top: 98px;
-                left: 8px;
-                padding: 5px 8px;
-            }
-            .map-academic-toggle-btn .academic-btn-text {
-                display: none;
-            }
-        }
-
-        /* ═══ ACADEMIC MAP MARKER & POPUP STYLES ═══ */
-        .academic-map-pin {
-            cursor: pointer;
-            transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .academic-map-pin:hover {
-            transform: scale(1.18);
-            z-index: 1200 !important;
-        }
-        .academic-marker-tooltip {
-            font-family: 'Tajawal', sans-serif !important;
-            font-size: 0.78rem !important;
-            font-weight: 700 !important;
-            background: #0F172A !important;
-            color: #FFFFFF !important;
-            border: 1px solid #F59E0B !important;
-            border-radius: 6px !important;
-            padding: 3px 8px !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
-            direction: rtl !important;
-        }
-        .academic-custom-popup .leaflet-popup-content-wrapper {
-            border-radius: 12px;
-            padding: 4px;
-            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.3);
-            border: 1px solid rgba(13, 46, 88, 0.15);
-        }
-        .academic-popup-btn:hover {
-            filter: brightness(1.15);
-            transform: translateY(-1px);
-        }
 
         /* ═══ FULLSCREEN MAP AREA SEARCH BOX ═══ */
         .map-area-search-box {
@@ -1806,7 +1709,7 @@
                     <span>MAT</span>
                     <span style="font-size: 0.8rem; font-weight: 600; color: var(--secondary); background: rgba(0,109,57,0.1); padding: 2px 8px; border-radius: 6px;">دليل المراكز الأمنية</span>
                 </h1>
-                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.46.16</span></p>
+                <p>حقيبة الأدوات المساعدة — تحديد المواقع جغرافياً <span class="version-tag">الإصدار 1.46.17</span></p>
             </div>
         </div>
         <div class="header-actions">
@@ -1919,12 +1822,6 @@
                         <span>تسجيل الدخول</span>
                     </a>
 
-                    <!-- Academic Layer Toggle Button on Map -->
-                    <button id="mapAcademicToggleBtn" class="map-academic-toggle-btn active" onclick="toggleAcademicLayer()" title="إظهار / إخفاء الصروح التعليمية والجامعات على الخريطة">
-                        <span class="academic-btn-icon">🎓</span>
-                        <span class="academic-btn-text">الصروح التعليمية</span>
-                        <span class="academic-btn-badge" id="academicCountBadge">69</span>
-                    </button>
 
                     <!-- Fullscreen Floating Area Search Box -->
                     <div id="mapAreaSearchBox" class="map-area-search-box">
@@ -3862,233 +3759,6 @@
         }
     
 
-        // ═══ AMMAN ACADEMIC & EDUCATIONAL INSTITUTIONS MAP LAYER ═══
-        const ammanAcademicInstitutions = [
-            // Universities & Technical Colleges
-            { "name": "الجامعة الأردنية (الجبيهة)", "nameEn": "University of Jordan", "type": "university", "lat": 32.015, "lon": 35.873, "liwa": "لواء الجامعة" },
-            { "name": "جامعة الأميرة سمية للتكنولوجيا (الجبيهة)", "nameEn": "Princess Sumaya University for Technology", "type": "university", "lat": 32.019, "lon": 35.869, "liwa": "لواء الجامعة" },
-            { "name": "جامعة العلوم التطبيقية الخاصة (شفا بدران)", "nameEn": "Applied Science Private University", "type": "university", "lat": 32.042, "lon": 35.898, "liwa": "لواء الجامعة" },
-            { "name": "جامعة البترا (طريق المطار)", "nameEn": "University of Petra", "type": "university", "lat": 31.892, "lon": 35.882, "liwa": "لواء وادي السير" },
-            { "name": "جامعة الزيتونة الأردنية (طريق المطار)", "nameEn": "Al-Zaytoonah University of Jordan", "type": "university", "lat": 31.802, "lon": 35.918, "liwa": "لواء الجيزة" },
-            { "name": "جامعة الإسراء (طريق المطار)", "nameEn": "Isra University", "type": "university", "lat": 31.785, "lon": 35.942, "liwa": "لواء الجيزة" },
-            { "name": "جامعة الشرق الأوسط (طريق المطار)", "nameEn": "Middle East University", "type": "university", "lat": 31.815, "lon": 35.925, "liwa": "لواء الجيزة" },
-            { "name": "الجامعة العربية المفتوحة (طريق المطار)", "nameEn": "Arab Open University", "type": "university", "lat": 31.872, "lon": 35.885, "liwa": "لواء وادي السير" },
-            { "name": "الجامعة الألمانية الأردنية (مبنى جبل عمان)", "nameEn": "German Jordanian University - Amman", "type": "university", "lat": 31.9548, "lon": 35.9185, "liwa": "لواء قصبة عمان" },
-            { "name": "الجامعة الألمانية الأردنية (المقر الرئيسي - المشقر)", "nameEn": "German Jordanian University - Main Campus", "type": "university", "lat": 31.782, "lon": 35.8015, "liwa": "لواء ناعور" },
-            { "name": "جامعة الحسين التقنية (HTU - مجمع الملك حسين للأعمال)", "nameEn": "Al-Hussein Technical University", "type": "university", "lat": 31.9715, "lon": 35.834, "liwa": "لواء وادي السير" },
-            { "name": "جامعة عمان العربية (شارع الأردن)", "nameEn": "Amman Arab University", "type": "university", "lat": 32.072, "lon": 35.875, "liwa": "لواء الجامعة" },
-            { "name": "جامعة عمان الأهلية (مكتب ارتباط عمان - الشميساني)", "nameEn": "Al-Ahliyya Amman University Office", "type": "university", "lat": 31.976, "lon": 35.904, "liwa": "لواء قصبة عمان" },
-            { "name": "الجامعة الهاشمية (مكتب ارتباط عمان - العبدلي)", "nameEn": "Hashemite University Office", "type": "university", "lat": 31.964, "lon": 35.918, "liwa": "لواء قصبة عمان" },
-            { "name": "جامعة اليرموك (مكتب ارتباط عمان - جبل عمان)", "nameEn": "Yarmouk University Office", "type": "university", "lat": 31.953, "lon": 35.914, "liwa": "لواء قصبة عمان" },
-            { "name": "جامعة مؤتة (مكتب ارتباط عمان - طريق المطار)", "nameEn": "Mutah University Office", "type": "university", "lat": 31.912, "lon": 35.885, "liwa": "لواء وادي السير" },
-            { "name": "جامعة العلوم والتكنولوجيا الأردنية (مكتب ارتباط عمان - الجبيهة)", "nameEn": "JUST University Office", "type": "university", "lat": 32.012, "lon": 35.871, "liwa": "لواء الجامعة" },
-            { "name": "جامعة كولومبيا - مركز الشرق الأوسط للأبحاث (جبل عمان)", "nameEn": "Columbia Global Centers Amman", "type": "university", "lat": 31.9565, "lon": 35.922, "liwa": "لواء قصبة عمان" },
-            { "name": "كلية الهندسة التكنولوجية - البوليتكنك (ماركا)", "nameEn": "Polytechnic Engineering College", "type": "university", "lat": 31.9915, "lon": 35.9985, "liwa": "لواء ماركا" },
-            { "name": "كلية لومينوس الجامعية التقنية (شارع المطار)", "nameEn": "Luminus Technical University College", "type": "university", "lat": 31.905, "lon": 35.888, "liwa": "لواء وادي السير" },
-            { "name": "كلية القدس (المقابلين)", "nameEn": "Al-Quds College", "type": "university", "lat": 31.908, "lon": 35.915, "liwa": "لواء القويسمة" },
-            { "name": "كلية عمان الجامعية للعلوم المالية (الجبيهة)", "nameEn": "Amman University College for Financial Sciences", "type": "university", "lat": 32.018, "lon": 35.878, "liwa": "لواء الجامعة" },
-            { "name": "كلية الخوارزمي الجامعية التقنية (تلاع العلي)", "nameEn": "Al-Khawarizmi University Technical College", "type": "university", "lat": 31.9965, "lon": 35.8725, "liwa": "لواء الجامعة" },
-            { "name": "الكلية الجامعية العربية للتكنولوجيا (أبو علندا)", "nameEn": "Arab University College of Technology", "type": "university", "lat": 31.908, "lon": 35.962, "liwa": "لواء القويسمة" },
-            { "name": "كلية حطين (أبو علندا)", "nameEn": "Hitteen College", "type": "university", "lat": 31.90781, "lon": 35.93611, "liwa": "لواء القويسمة" },
-            { "name": "كلية المجتمع العربي (خلدا)", "nameEn": "Arab Community College", "type": "university", "lat": 32.0035, "lon": 35.8525, "liwa": "لواء الجامعة" },
-            { "name": "كلية تدريب عمان (ناعور - الأونروا)", "nameEn": "Amman Training Centre (UNRWA)", "type": "university", "lat": 31.872, "lon": 35.824, "liwa": "لواء ناعور" },
-            { "name": "كلية العلوم التربوية والآداب (المقابلين - الأونروا)", "nameEn": "Faculty of Educational Sciences & Arts", "type": "university", "lat": 31.914, "lon": 35.915, "liwa": "لواء القويسمة" },
-            { "name": "كلية توليدو الأهلية (العبدلي)", "nameEn": "Toledo College", "type": "university", "lat": 31.961, "lon": 35.922, "liwa": "لواء قصبة عمان" },
-            { "name": "كلية المجتمع الإسلامي (الجبيهة)", "nameEn": "Islamic Community College", "type": "university", "lat": 32.016, "lon": 35.862, "liwa": "لواء الجامعة" },
-            { "name": "كلية العلوم الإسلامية (طبربور)", "nameEn": "Islamic Sciences College", "type": "university", "lat": 32.0085, "lon": 35.9385, "liwa": "لواء ماركا" },
-
-            // Military, Police & Institutes
-            { "name": "أكاديمية الشرطة الملكية (طبربور)", "nameEn": "Royal Police Academy", "type": "university", "lat": 32.008, "lon": 35.952, "liwa": "لواء ماركا" },
-            { "name": "كلية القيادة والأركان الملكية الأردنية (طريق المطار)", "nameEn": "Royal Jordanian Command & Staff College", "type": "university", "lat": 31.878, "lon": 35.881, "liwa": "لواء وادي السير" },
-            { "name": "كلية الدفاع الوطني الملكية الأردنية (طريق المطار)", "nameEn": "Royal Jordanian National Defense College", "type": "university", "lat": 31.865, "lon": 35.875, "liwa": "لواء وادي السير" },
-            { "name": "أكاديمية الطيران الملكية الأردنية (مطار ماركا)", "nameEn": "Royal Jordanian Air Academy", "type": "university", "lat": 31.9785, "lon": 35.9965, "liwa": "لواء ماركا" },
-            { "name": "الأكاديمية الملكية لفنون الطهي (دابوق)", "nameEn": "Royal Academy of Culinary Arts", "type": "university", "lat": 31.9965, "lon": 35.8315, "liwa": "لواء وادي السير" },
-            { "name": "المعهد القضائي الأردني (العبدلي)", "nameEn": "Judicial Institute of Jordan", "type": "university", "lat": 31.9635, "lon": 35.917, "liwa": "لواء قصبة عمان" },
-            { "name": "المعهد الدبلوماسي الأردني (أم أذينة)", "nameEn": "Jordan Institute of Diplomacy", "type": "university", "lat": 31.9615, "lon": 35.865, "liwa": "لواء قصبة عمان" },
-            { "name": "معهد الإعلام الأردني (طريق المطار)", "nameEn": "Jordan Media Institute", "type": "university", "lat": 31.905, "lon": 35.879, "liwa": "لواء وادي السير" },
-            { "name": "أكاديمية الملكة رانيا لتدريب المعلمين (دابوق)", "nameEn": "Queen Rania Teacher Academy", "type": "university", "lat": 31.9945, "lon": 35.8345, "liwa": "لواء وادي السير" },
-
-            // Premier Schools & Academies
-            { "name": "مدارس كينغز أكاديمي (طريق المطار)", "nameEn": "King's Academy", "type": "school", "lat": 31.758, "lon": 35.872, "liwa": "لواء ناعور" },
-            { "name": "مدرسة البكالوريا الدولية (دابوق)", "nameEn": "Amman Baccalaureate School", "type": "school", "lat": 31.983, "lon": 35.829, "liwa": "لواء وادي السير" },
-            { "name": "مدارس اليوبيل (شفا بدران)", "nameEn": "Jubilee School", "type": "school", "lat": 32.032, "lon": 35.885, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الكلية العلمية الإسلامية (جبل عمان)", "nameEn": "Islamic Educational College - Jabal Amman", "type": "school", "lat": 31.952, "lon": 35.918, "liwa": "لواء قصبة عمان" },
-            { "name": "مدارس الكلية العلمية الإسلامية (الجبيهة)", "nameEn": "Islamic Educational College - Jubaiha", "type": "school", "lat": 32.022, "lon": 35.865, "liwa": "لواء الجامعة" },
-            { "name": "مدارس المطران للبنين (جبل عمان)", "nameEn": "Bishop's School for Boys", "type": "school", "lat": 31.954, "lon": 35.921, "liwa": "لواء قصبة عمان" },
-            { "name": "المدرسة الأهلية للبنات (جبل عمان)", "nameEn": "Ahliyyah School for Girls", "type": "school", "lat": 31.9535, "lon": 35.9225, "liwa": "لواء قصبة عمان" },
-            { "name": "مدارس المشرق الدولية (عبدون)", "nameEn": "Mashrek International School", "type": "school", "lat": 31.936, "lon": 35.879, "liwa": "لواء قصبة عمان" },
-            { "name": "مدارس النظم الحديثة (تلاع العلي)", "nameEn": "Modern Systems Schools", "type": "school", "lat": 31.998, "lon": 35.859, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الرضوان (خلدا)", "nameEn": "Al-Radwan Schools", "type": "school", "lat": 31.992, "lon": 35.841, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الاتحاد (خلدا)", "nameEn": "Al-Ittihad Schools - Khalda", "type": "school", "lat": 31.995, "lon": 35.848, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الاتحاد (الشميساني)", "nameEn": "Al-Ittihad Schools - Shmeisani", "type": "school", "lat": 31.974, "lon": 35.901, "liwa": "لواء قصبة عمان" },
-            { "name": "مدارس الرأي (الجبيهة)", "nameEn": "Al-Rai Schools", "type": "school", "lat": 32.018, "lon": 35.859, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الحصاد التربوي (المقابلين)", "nameEn": "Al-Hassad Al-Tarbawi Schools", "type": "school", "lat": 31.912, "lon": 35.925, "liwa": "لواء القويسمة" },
-            { "name": "مدارس ساندس الوطنية (خلدا)", "nameEn": "Sands National Academy", "type": "school", "lat": 31.991, "lon": 35.836, "liwa": "لواء الجامعة" },
-            { "name": "مدارس الدر المنثور (أم أذينة)", "nameEn": "Al-Dur Al-Manthoor Schools", "type": "school", "lat": 31.968, "lon": 35.861, "liwa": "لواء قصبة عمان" },
-            { "name": "مدارس الأكاديمية العربية الحديثة (الشميساني)", "nameEn": "Modern Arab Academy Schools", "type": "school", "lat": 31.972, "lon": 35.885, "liwa": "لواء قصبة عمان" },
-            { "name": "مدرسة المعمدانية (الشميساني)", "nameEn": "Baptist School", "type": "school", "lat": 31.971, "lon": 35.892, "liwa": "لواء قصبة عمان" },
-            { "name": "مدرسة دي لاسال الفرير (جبل الحسين)", "nameEn": "De La Salle College (Frere)", "type": "school", "lat": 31.964, "lon": 35.924, "liwa": "لواء قصبة عمان" },
-            { "name": "مدرسة كلية تراسنطة (جبل اللويبدة)", "nameEn": "Terra Santa College", "type": "school", "lat": 31.959, "lon": 35.925, "liwa": "لواء قصبة عمان" },
-            { "name": "مدرسة راهبات الوردية (الشميساني)", "nameEn": "Rosary Sisters School - Shmeisani", "type": "school", "lat": 31.9715, "lon": 35.898, "liwa": "لواء قصبة عمان" },
-            { "name": "مدرسة راهبات الوردية (مرج الحمام)", "nameEn": "Rosary Sisters School - Marj Al-Hamam", "type": "school", "lat": 31.895, "lon": 35.852, "liwa": "لواء وادي السير" },
-            { "name": "مدارس الجزيرة (الجبيهة)", "nameEn": "Al-Jazeera Schools", "type": "school", "lat": 32.021, "lon": 35.872, "liwa": "لواء الجامعة" },
-            { "name": "مدارس أكسفورد (شارع مكة)", "nameEn": "Oxford Schools", "type": "school", "lat": 31.982, "lon": 35.848, "liwa": "لواء الجامعة" },
-            { "name": "مدارس المنهل العالمية (الجبيهة)", "nameEn": "Al-Manhal International Schools", "type": "school", "lat": 32.025, "lon": 35.874, "liwa": "لواء الجامعة" },
-            { "name": "أكاديمية عمان (دابوق / خلدا)", "nameEn": "Amman Academy", "type": "school", "lat": 31.989, "lon": 35.835, "liwa": "لواء وادي السير" },
-            { "name": "الأكاديمية الدولية - عمان (دابوق)", "nameEn": "International Academy - Amman (IAA)", "type": "school", "lat": 31.978, "lon": 35.825, "liwa": "لواء وادي السير" },
-            { "name": "مدرسة الشويفات الدولية (طريق المطار)", "nameEn": "International School of Choueifat", "type": "school", "lat": 31.802, "lon": 35.915, "liwa": "لواء الجيزة" },
-            { "name": "مدارس البيان (الجبيهة)", "nameEn": "Al-Bayan Schools", "type": "school", "lat": 32.019, "lon": 35.867, "liwa": "لواء الجامعة" }
-        ];
-
-        var academicLayerGroup = null;
-        var isAcademicLayerActive = true;
-
-        function createAcademicMarkerIcon(type = 'university') {
-            const isUni = type === 'university';
-            const bgGradient = isUni ? 'linear-gradient(135deg, #1E1B4B 0%, #312E81 100%)' : 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)';
-            const borderColor = isUni ? '#F59E0B' : '#60A5FA';
-            const icon = isUni ? '🎓' : '📚';
-            const size = isUni ? 32 : 28;
-
-            const html = `
-                <div class="academic-map-pin ${isUni ? 'uni-pin' : 'school-pin'}" style="position:relative; width:${size}px; height:${size + 9}px; display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 3px 6px rgba(15,23,42,0.45)); cursor:pointer;">
-                    <div style="width:${size}px; height:${size}px; background:${bgGradient}; border:2px solid ${borderColor}; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:inset 0 1px 2px rgba(255,255,255,0.3);">
-                        <span style="font-size:${isUni ? '16px' : '13px'}; line-height:1; user-select:none;">${icon}</span>
-                    </div>
-                    <div style="width:0; height:0; border-left:4.5px solid transparent; border-right:4.5px solid transparent; border-top:7px solid ${borderColor}; margin-top:-1px;"></div>
-                </div>
-            `;
-
-            return L.divIcon({
-                className: 'custom-academic-pin-icon',
-                html: html,
-                iconSize: [size, size + 9],
-                iconAnchor: [size / 2, size + 9],
-                popupAnchor: [0, -(size + 9)]
-            });
-        }
-
-        function createAcademicMarker(item) {
-            const isUni = item.type === 'university';
-            const icon = createAcademicMarkerIcon(item.type);
-            const marker = L.marker([item.lat, item.lon], {
-                icon: icon,
-                zIndexOffset: isUni ? 350 : 250,
-                title: item.name
-            });
-
-            marker.bindTooltip(item.name, {
-                direction: 'top',
-                offset: [0, -32],
-                className: 'academic-marker-tooltip',
-                permanent: false
-            });
-
-            const safeName = item.name.replace(/'/g, "\\'");
-            const adminLiwa = item.liwa || 'محافظة العاصمة';
-
-            const popupContent = `
-                <div class="academic-popup-container" style="font-family:'Tajawal',sans-serif; text-align:right; min-width:230px; padding:6px 4px; direction:rtl;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                        <span style="font-size:0.75rem; font-weight:800; background:#EEF2FF; color:#3730A3; padding:2px 8px; border-radius:6px; border:1px solid #C7D2FE;">
-                            ${isUni ? '🎓 صرح جامعي / أكاديمي' : '📚 صرح تعليمي / مدرسي'}
-                        </span>
-                        <span style="font-size:0.75rem; color:#64748B; font-weight:600;">عمان</span>
-                    </div>
-                    <div style="font-size:0.96rem; font-weight:800; color:#0F172A; margin-bottom:4px; line-height:1.35;">
-                        ${item.name}
-                    </div>
-                    ${item.nameEn ? `<div style="font-size:0.74rem; color:#64748B; margin-bottom:8px;">${item.nameEn}</div>` : ''}
-                    <div style="display:flex; align-items:center; gap:5px; font-size:0.78rem; color:#475569; background:#F8FAFC; padding:5px 8px; border-radius:6px; border:1px solid #E2E8F0; margin-bottom:10px;">
-                        <span>🏛️</span>
-                        <span>التبعية الإدارية: <b>${adminLiwa}</b></span>
-                    </div>
-                    <button type="button" class="academic-popup-btn" onclick="selectAcademicInstitution('${safeName}', ${item.lat}, ${item.lon})" style="width:100%; background:linear-gradient(135deg, #0D2E58 0%, #1E3A8A 100%); color:#ffffff; border:none; padding:8px 12px; border-radius:8px; font-family:'Tajawal',sans-serif; font-size:0.84rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 3px 10px rgba(13,46,88,0.25); transition:all 0.2s;">
-                        <span>👮</span> <span>تحديد واستعراض أقرب مركز أمني</span>
-                    </button>
-                </div>
-            `;
-
-            marker.bindPopup(popupContent, {
-                maxWidth: 320,
-                className: 'academic-custom-popup'
-            });
-
-            marker.on('click', function(e) {
-                if (e && e.originalEvent) {
-                    L.DomEvent.stopPropagation(e.originalEvent);
-                }
-            });
-
-            return marker;
-        }
-
-        function initAcademicMapLayer() {
-            if (!stationMap || typeof L === 'undefined') return;
-            if (!academicLayerGroup) {
-                academicLayerGroup = L.layerGroup();
-                ammanAcademicInstitutions.forEach(item => {
-                    const m = createAcademicMarker(item);
-                    if (m) academicLayerGroup.addLayer(m);
-                });
-            }
-
-            if (isAcademicLayerActive && !stationMap.hasLayer(academicLayerGroup)) {
-                academicLayerGroup.addTo(stationMap);
-            }
-
-            const badge = document.getElementById('academicCountBadge');
-            if (badge) {
-                badge.textContent = ammanAcademicInstitutions.length;
-            }
-        }
-
-        function toggleAcademicLayer() {
-            if (!stationMap) return;
-            if (!academicLayerGroup) {
-                initAcademicMapLayer();
-                return;
-            }
-            const btn = document.getElementById('mapAcademicToggleBtn');
-            if (stationMap.hasLayer(academicLayerGroup)) {
-                stationMap.removeLayer(academicLayerGroup);
-                isAcademicLayerActive = false;
-                if (btn) {
-                    btn.classList.remove('active');
-                    btn.setAttribute('title', 'إظهار الصروح التعليمية على الخريطة');
-                }
-            } else {
-                stationMap.addLayer(academicLayerGroup);
-                isAcademicLayerActive = true;
-                if (btn) {
-                    btn.classList.add('active');
-                    btn.setAttribute('title', 'إخفاء الصروح التعليمية من الخريطة');
-                }
-            }
-        }
-
-        window.selectAcademicInstitution = async function(name, lat, lon) {
-            if (stationMap) {
-                stationMap.closePopup();
-            }
-            const placeInput = document.getElementById('placeInput');
-            if (placeInput) placeInput.value = name;
-            const mapAreaSearchInput = document.getElementById('mapAreaSearchInput');
-            if (mapAreaSearchInput) {
-                mapAreaSearchInput.value = name;
-                toggleMapAreaClearBtn(true);
-            }
-            closeMapAreaAutocomplete();
-            const acResults = document.getElementById('autocompleteResults');
-            if (acResults) acResults.classList.remove('active');
-
-            if (stationMap) {
-                stationMap.flyTo([lat, lon], 14, { duration: 0.6 });
-            }
-
-            setLoading(true);
-            await fetchStationsForCoords(lat, lon, name, false);
-        };
 
         // Custom Offline-First TileLayer with automatic online fallback and offline SVG placeholder
         if (typeof L !== 'undefined' && !L.TileLayer.OfflineFirst) {
@@ -4971,8 +4641,6 @@
                     maxZoom: 19,
                     attribution: '© OpenStreetMap'
                 }).addTo(stationMap);
-
-                initAcademicMapLayer();
                 
                 stationMap.on('click', async function(e) {
                     const lat = e.latlng.lat;
@@ -5014,9 +4682,6 @@
                 markers = [];
                 clearBranchMarkers();
                 currentRouteLine = null;
-                if (isAcademicLayerActive && academicLayerGroup && !stationMap.hasLayer(academicLayerGroup)) {
-                    academicLayerGroup.addTo(stationMap);
-                }
             }
 
             // تحديد اللواء التابع للنتيجة وتطبيق التظليل المناسب
